@@ -29,6 +29,7 @@
 #include <app/reporting/reporting.h>
 #include <app/util/af-types.h>
 #include <app/util/attribute-storage.h>
+#include <app/util/attribute-table.h>
 #include <app/util/endpoint-config-api.h>
 #include <app/util/util.h>
 #include <credentials/DeviceAttestationCredsProvider.h>
@@ -45,12 +46,17 @@
 
 #include "CommissionableInit.h"
 #include "Device.h"
+#include "MatterBridgeBackChannel.h"
+#include "MatterBridgeCameraSlots.h"
 #include "include/main.h"
 #include "main.h"
 #include <app/server/Server.h>
+#include <cstdlib>
 
 #include <cassert>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -106,6 +112,12 @@ const int16_t initialMeasuredValue = 100;
 #define DEVICE_TYPE_POWER_SOURCE 0x0011
 // (taken from matter-devices.xml)
 #define DEVICE_TYPE_TEMP_SENSOR 0x0302
+// MatterBridge: occupancy sensor — used as a stand-in until the Camera
+// 0x0142 device-type with full AVStream/Zone/UserLevel/WebRTC clusters is
+// in. SmartThings categorizes endpoints with this device-type as motion
+// sensors, so each bridged camera at least surfaces as a working motion
+// trigger driven by Scrypted/ONVIF events.
+#define DEVICE_TYPE_OCCUPANCY_SENSOR 0x0107
 
 // Device Version for dynamic endpoints:
 #define DEVICE_VERSION_DEFAULT 1
@@ -133,10 +145,22 @@ DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::DeviceTypeList::Id, ARRAY, kDe
 #endif
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
 
-// Declare Bridged Device Basic Information cluster attributes
+// Declare Bridged Device Basic Information cluster attributes.
+// SmartThings subscribes to VendorName + ProductName + SoftwareVersion +
+// SoftwareVersionString during attach. If any is missing the helper returns
+// UNSUPPORTED_ATTRIBUTE and SmartThings retries the subscription every 30s,
+// flickering the device offline/online. So we expose the optional ones it
+// asks for, even though only NodeLabel + Reachable are spec-mandatory.
 DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(bridgedDeviceBasicAttrs)
-DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::NodeLabel::Id, CHAR_STRING, kNodeLabelSize,
-                          ZAP_ATTRIBUTE_MASK(WRITABLE) | ZAP_ATTRIBUTE_MASK(EXTERNAL_STORAGE)),         /* NodeLabel */
+DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::VendorName::Id, CHAR_STRING, 32, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::VendorID::Id, INT16U, 2, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::ProductName::Id, CHAR_STRING, 32, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::NodeLabel::Id, CHAR_STRING, kNodeLabelSize,
+                              ZAP_ATTRIBUTE_MASK(WRITABLE) | ZAP_ATTRIBUTE_MASK(EXTERNAL_STORAGE)),     /* NodeLabel */
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::HardwareVersion::Id, INT16U, 2, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::HardwareVersionString::Id, CHAR_STRING, 64, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::SoftwareVersion::Id, INT32U, 4, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::SoftwareVersionString::Id, CHAR_STRING, 64, 0),
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::Reachable::Id, BOOLEAN, 1, 0), /* Reachable */
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::UniqueID::Id, CHAR_STRING, kUniqueIdSize, 0),
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id, INT32U, 4,
@@ -175,10 +199,10 @@ DeviceTempSensor TempSensor1("TempSensor 1", "Office", minMeasuredValue, maxMeas
 DeviceTempSensor TempSensor2("TempSensor 2", "Office", minMeasuredValue, maxMeasuredValue, initialMeasuredValue);
 
 // Declare Bridged endpoints used for Action clusters
-DataVersion gActionLight1DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
-DataVersion gActionLight2DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
-DataVersion gActionLight3DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
-DataVersion gActionLight4DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
+[[maybe_unused]] DataVersion gActionLight1DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
+[[maybe_unused]] DataVersion gActionLight2DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
+[[maybe_unused]] DataVersion gActionLight3DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
+[[maybe_unused]] DataVersion gActionLight4DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 
 DeviceOnOff ActionLight1("Action Light 1", "Room 1");
 DeviceOnOff ActionLight2("Action Light 2", "Room 1");
@@ -221,9 +245,9 @@ DECLARE_DYNAMIC_CLUSTER(TemperatureMeasurement::Id, tempSensorAttrs, ZAP_CLUSTER
     DECLARE_DYNAMIC_CLUSTER_LIST_END;
 
 // Declare Bridged Light endpoint
-DECLARE_DYNAMIC_ENDPOINT(bridgedTempSensorEndpoint, bridgedTempSensorClusters);
-DataVersion gTempSensor1DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
-DataVersion gTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+[[maybe_unused]] DECLARE_DYNAMIC_ENDPOINT(bridgedTempSensorEndpoint, bridgedTempSensorClusters);
+[[maybe_unused]] DataVersion gTempSensor1DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+[[maybe_unused]] DataVersion gTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
 
 // ---------------------------------------------------------------------------
 //
@@ -249,10 +273,68 @@ DECLARE_DYNAMIC_CLUSTER(Descriptor::Id, descriptorAttrs, ZAP_CLUSTER_MASK(SERVER
     DECLARE_DYNAMIC_CLUSTER(PowerSource::Id, powerSourceAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
     DECLARE_DYNAMIC_CLUSTER_LIST_END;
 
-DECLARE_DYNAMIC_ENDPOINT(bridgedComposedDeviceEndpoint, bridgedComposedDeviceClusters);
-DataVersion gComposedDeviceDataVersions[MATTER_ARRAY_SIZE(bridgedComposedDeviceClusters)];
-DataVersion gComposedTempSensor1DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
-DataVersion gComposedTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+[[maybe_unused]] DECLARE_DYNAMIC_ENDPOINT(bridgedComposedDeviceEndpoint, bridgedComposedDeviceClusters);
+[[maybe_unused]] DataVersion gComposedDeviceDataVersions[MATTER_ARRAY_SIZE(bridgedComposedDeviceClusters)];
+[[maybe_unused]] DataVersion gComposedTempSensor1DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+[[maybe_unused]] DataVersion gComposedTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+
+// ---------------------------------------------------------------------------
+// MatterBridge: CAMERA STUB ENDPOINT (P5d step 2)
+//
+// Bridged Node + BridgedDeviceBasicInformation + Identify. Identify is the
+// one cross-device-type cluster every Matter spec controller knows how to
+// handle, and its server is already linked into chip-bridge-app via the
+// existing ZAP config — so no codegen change required.
+//
+// The full Matter 1.5 camera clusters (0x0550–0x0553) require ZAP regen
+// of bridge-app's data model plus per-cluster delegate implementations;
+// that's P5d step 3. For now SmartThings sees each child as a
+// "Bridged Node" with name + identify support.
+
+// Identify cluster attribute list. The cluster server provides the
+// behavior; we only declare the public attributes for dynamic registration.
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(identifyAttrs)
+DECLARE_DYNAMIC_ATTRIBUTE(Identify::Attributes::IdentifyTime::Id, INT16U, 2,
+                          ZAP_ATTRIBUTE_MASK(WRITABLE)),
+    DECLARE_DYNAMIC_ATTRIBUTE(Identify::Attributes::IdentifyType::Id, ENUM8, 1, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+
+constexpr CommandId identifyIncomingCommands[] = {
+    Identify::Commands::Identify::Id,
+    Identify::Commands::TriggerEffect::Id,
+    kInvalidCommandId,
+};
+
+// OccupancySensing cluster. The cluster server is not compiled (bridge-app's
+// ZAP doesn't include it), but we don't need it for attribute reads — the
+// EmberAf dynamic-endpoint dispatch routes attribute reads through
+// `emberAfExternalAttributeReadCallback`, which we control. Commands aren't
+// part of OccupancySensing's normative shape, so a missing server delegate
+// has no behavioral effect.
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(occupancySensingAttrs)
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::Occupancy::Id, BITMAP8, 1, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::OccupancySensorType::Id, ENUM8, 1, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::OccupancySensorTypeBitmap::Id, BITMAP8, 1, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::FeatureMap::Id, BITMAP32, 4, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+
+[[maybe_unused]] DECLARE_DYNAMIC_CLUSTER_LIST_BEGIN(bridgedCameraStubClusters)
+DECLARE_DYNAMIC_CLUSTER(Identify::Id, identifyAttrs, ZAP_CLUSTER_MASK(SERVER), identifyIncomingCommands, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(OccupancySensing::Id, occupancySensingAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(Descriptor::Id, descriptorAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(BridgedDeviceBasicInformation::Id, bridgedDeviceBasicAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+    DECLARE_DYNAMIC_CLUSTER_LIST_END;
+
+[[maybe_unused]] DECLARE_DYNAMIC_ENDPOINT(bridgedCameraStubEndpoint, bridgedCameraStubClusters);
+
+// Bridged Node + Occupancy Sensor — kept here for the legacy dynamic-endpoint
+// path that ran before P5d step 3. Pre-allocated slots in
+// MatterBridgeCameraSlots take over for cameras; this declaration stays so
+// we still have a valid stub endpoint type if we ever need to fall back.
+[[maybe_unused]] const EmberAfDeviceType gBridgedCameraStubDeviceTypes[] = {
+    { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT },
+    { DEVICE_TYPE_OCCUPANCY_SENSOR, DEVICE_VERSION_DEFAULT },
+};
 
 } // namespace
 
@@ -492,6 +574,45 @@ Protocols::InteractionModel::Status HandleReadBridgedDeviceBasicAttribute(Device
         MutableByteSpan zclNameSpan(buffer, maxReadLength);
         MakeZclCharString(zclNameSpan, dev->GetName());
     }
+    // MatterBridge: SmartThings subscribes to VendorName / ProductName /
+    // SoftwareVersion / HardwareVersion at attach. We synthesize defaults so
+    // the subscription doesn't fail with UNSUPPORTED_ATTRIBUTE (which causes
+    // controllers to flicker the device offline/online).
+    else if (attributeId == VendorName::Id)
+    {
+        MutableByteSpan zclSpan(buffer, maxReadLength);
+        MakeZclCharString(zclSpan, "MatterBridge");
+    }
+    else if (attributeId == VendorID::Id && maxReadLength >= 2)
+    {
+        uint16_t vid = 0xFFF1; // Test vendor ID
+        memcpy(buffer, &vid, sizeof(vid));
+    }
+    else if (attributeId == ProductName::Id)
+    {
+        MutableByteSpan zclSpan(buffer, maxReadLength);
+        MakeZclCharString(zclSpan, "Bridged Camera");
+    }
+    else if (attributeId == HardwareVersion::Id && maxReadLength >= 2)
+    {
+        uint16_t hv = 1;
+        memcpy(buffer, &hv, sizeof(hv));
+    }
+    else if (attributeId == HardwareVersionString::Id)
+    {
+        MutableByteSpan zclSpan(buffer, maxReadLength);
+        MakeZclCharString(zclSpan, "1.0");
+    }
+    else if (attributeId == SoftwareVersion::Id && maxReadLength >= 4)
+    {
+        uint32_t sv = 1;
+        memcpy(buffer, &sv, sizeof(sv));
+    }
+    else if (attributeId == SoftwareVersionString::Id)
+    {
+        MutableByteSpan zclSpan(buffer, maxReadLength);
+        MakeZclCharString(zclSpan, "0.1.0");
+    }
     else if ((attributeId == UniqueID::Id) && (maxReadLength == 32))
     {
         MutableByteSpan zclUniqueIdSpan(buffer, maxReadLength);
@@ -631,6 +752,11 @@ Protocols::InteractionModel::Status emberAfExternalAttributeReadCallback(Endpoin
                                                                          const EmberAfAttributeMetadata * attributeMetadata,
                                                                          uint8_t * buffer, uint16_t maxReadLength)
 {
+    // Camera slots (endpoints 3..10) are FIXED endpoints declared in ZAP with
+    // RAM-backed attribute storage handled natively by ember; the only dynamic
+    // endpoints we still register are the legacy demo lights/sensors guarded
+    // by MATTERBRIDGE_KEEP_DEMOS. Cluster server AAIs (registered in
+    // InitCameraSlots) cover all camera-cluster reads on slots.
     uint16_t endpointIndex = emberAfGetDynamicIndexFromEndpoint(endpoint);
 
     Protocols::InteractionModel::Status ret = Protocols::InteractionModel::Status::Failure;
@@ -783,12 +909,12 @@ void runOnOffRoomAction(Room * room, bool actionOn, EndpointId endpointId, uint1
 const EmberAfDeviceType gBridgedOnOffDeviceTypes[] = { { DEVICE_TYPE_LO_ON_OFF_LIGHT, DEVICE_VERSION_DEFAULT },
                                                        { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
-const EmberAfDeviceType gBridgedComposedDeviceTypes[] = { { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT },
+[[maybe_unused]] const EmberAfDeviceType gBridgedComposedDeviceTypes[] = { { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT },
                                                           { DEVICE_TYPE_POWER_SOURCE, DEVICE_VERSION_DEFAULT } };
 
-const EmberAfDeviceType gComposedTempSensorDeviceTypes[] = { { DEVICE_TYPE_TEMP_SENSOR, DEVICE_VERSION_DEFAULT } };
+[[maybe_unused]] const EmberAfDeviceType gComposedTempSensorDeviceTypes[] = { { DEVICE_TYPE_TEMP_SENSOR, DEVICE_VERSION_DEFAULT } };
 
-const EmberAfDeviceType gBridgedTempSensorDeviceTypes[] = { { DEVICE_TYPE_TEMP_SENSOR, DEVICE_VERSION_DEFAULT },
+[[maybe_unused]] const EmberAfDeviceType gBridgedTempSensorDeviceTypes[] = { { DEVICE_TYPE_TEMP_SENSOR, DEVICE_VERSION_DEFAULT },
                                                             { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
 #define POLL_INTERVAL_MS (100)
@@ -985,22 +1111,35 @@ void ApplicationInit()
         static_cast<int>(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1))) + 1);
     gCurrentEndpointId = gFirstDynamicEndpointId;
 
-    // Disable last fixed endpoint, which is used as a placeholder for all of the
-    // supported clusters so that ZAP will generated the requisite code.
-    emberAfEndpointEnableDisable(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1)), false);
+    // Upstream bridge-app disables the last fixed endpoint as a "supported
+    // clusters" placeholder. With our per-slot endpoint-type merge, every
+    // slot independently carries the camera clusters, so the placeholder
+    // pattern isn't needed and disabling slot endpoint 10 would actively
+    // break the per-endpoint AAI dispatch for that slot.
+    // emberAfEndpointEnableDisable(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1)), false);
 
-    // Add light 1 -> will be mapped to ZCL endpoints 3
+    // MatterBridge: the upstream chip-bridge-app example registers ~12 demo
+    // endpoints (Light, TempSensor, Composed, Action lights). They show up
+    // in SmartThings as fake children of our bridge — confusing for users
+    // who expect to see real cameras. We replace them with a single minimal
+    // placeholder Light1 so the bridge isn't empty (some controllers reject
+    // an aggregator with zero children) until the camera-cluster work lands
+    // and per-camera dynamic endpoints take over.
+    //
+    // Set MATTERBRIDGE_KEEP_DEMOS=1 (in build args or here) to restore the
+    // upstream demos for development/debug.
+#ifndef MATTERBRIDGE_KEEP_DEMOS
+#define MATTERBRIDGE_KEEP_DEMOS 0
+#endif
+
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
+#if MATTERBRIDGE_KEEP_DEMOS
     AddDeviceEndpoint(&Light1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gLight1DataVersions), 1);
-
-    // Add Temperature Sensor devices --> will be mapped to endpoints 4,5
     AddDeviceEndpoint(&TempSensor1, &bridgedTempSensorEndpoint, Span<const EmberAfDeviceType>(gBridgedTempSensorDeviceTypes),
                       Span<DataVersion>(gTempSensor1DataVersions), 1);
     AddDeviceEndpoint(&TempSensor2, &bridgedTempSensorEndpoint, Span<const EmberAfDeviceType>(gBridgedTempSensorDeviceTypes),
                       Span<DataVersion>(gTempSensor2DataVersions), 1);
-
-    // Add composed Device with two temperature sensors and a power source
     AddDeviceEndpoint(&gComposedDevice, &bridgedComposedDeviceEndpoint, Span<const EmberAfDeviceType>(gBridgedComposedDeviceTypes),
                       Span<DataVersion>(gComposedDeviceDataVersions), 1);
     AddDeviceEndpoint(&ComposedTempSensor1, &bridgedTempSensorEndpoint,
@@ -1009,8 +1148,6 @@ void ApplicationInit()
     AddDeviceEndpoint(&ComposedTempSensor2, &bridgedTempSensorEndpoint,
                       Span<const EmberAfDeviceType>(gComposedTempSensorDeviceTypes),
                       Span<DataVersion>(gComposedTempSensor2DataVersions), gComposedDevice.GetEndpointId());
-
-    // Add 4 lights for the Action Clusters tests
     AddDeviceEndpoint(&ActionLight1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gActionLight1DataVersions), 1);
     AddDeviceEndpoint(&ActionLight2, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
@@ -1019,17 +1156,15 @@ void ApplicationInit()
                       Span<DataVersion>(gActionLight3DataVersions), 1);
     AddDeviceEndpoint(&ActionLight4, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gActionLight4DataVersions), 1);
+#endif // MATTERBRIDGE_KEEP_DEMOS
 #else
+#if MATTERBRIDGE_KEEP_DEMOS
     AddDeviceEndpoint(&Light1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gLight1DataVersions), ""_span, 1);
-
-    // Add Temperature Sensor devices --> will be mapped to endpoints 4,5
     AddDeviceEndpoint(&TempSensor1, &bridgedTempSensorEndpoint, Span<const EmberAfDeviceType>(gBridgedTempSensorDeviceTypes),
                       Span<DataVersion>(gTempSensor1DataVersions), ""_span, 1);
     AddDeviceEndpoint(&TempSensor2, &bridgedTempSensorEndpoint, Span<const EmberAfDeviceType>(gBridgedTempSensorDeviceTypes),
                       Span<DataVersion>(gTempSensor2DataVersions), ""_span, 1);
-
-    // Add composed Device with two temperature sensors and a power source
     AddDeviceEndpoint(&gComposedDevice, &bridgedComposedDeviceEndpoint, Span<const EmberAfDeviceType>(gBridgedComposedDeviceTypes),
                       Span<DataVersion>(gComposedDeviceDataVersions), ""_span, 1);
     AddDeviceEndpoint(&ComposedTempSensor1, &bridgedTempSensorEndpoint,
@@ -1040,8 +1175,6 @@ void ApplicationInit()
                       Span<const EmberAfDeviceType>(gComposedTempSensorDeviceTypes),
                       Span<DataVersion>(gComposedTempSensor2DataVersions), "AABBCCDDEEFFGGHHIIJJKKLLMMNNOO02"_span,
                       gComposedDevice.GetEndpointId());
-
-    // Add 4 lights for the Action Clusters tests
     AddDeviceEndpoint(&ActionLight1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gActionLight1DataVersions), ""_span, 1);
     AddDeviceEndpoint(&ActionLight2, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
@@ -1050,8 +1183,10 @@ void ApplicationInit()
                       Span<DataVersion>(gActionLight3DataVersions), ""_span, 1);
     AddDeviceEndpoint(&ActionLight4, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
                       Span<DataVersion>(gActionLight4DataVersions), ""_span, 1);
+#endif // MATTERBRIDGE_KEEP_DEMOS
 #endif
 
+#if MATTERBRIDGE_KEEP_DEMOS
     // Because the power source is on the same endpoint as the composed device, it needs to be explicitly added
     gDevices[CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT] = &ComposedPowerSource;
     // This provides power for the composed endpoint
@@ -1061,6 +1196,7 @@ void ApplicationInit()
     endpointList.push_back(ComposedTempSensor2.GetEndpointId());
     ComposedPowerSource.SetEndpointList(endpointList);
     ComposedPowerSource.SetEndpointId(gComposedDevice.GetEndpointId());
+#endif // MATTERBRIDGE_KEEP_DEMOS
 
     gRooms.push_back(&room1);
     gRooms.push_back(&room2);
@@ -1088,13 +1224,42 @@ void ApplicationInit()
         sChipNamedPipeCommands.Stop();
     }
 
+    // MatterBridge: open the back-channel Unix-domain socket if the parent
+    // (Swift app) gave us a path. This is what cluster delegates use to ask
+    // Swift for media — snapshots, WebRTC SDP, PTZ commands. One client at a
+    // time; Swift reconnects on helper restart.
+    if (const char * bcPath = std::getenv("MB_BACK_CHANNEL_SOCKET"))
+    {
+        if (bcPath[0] != '\0')
+        {
+            if (!MatterBridge::GetBackChannel().Start(bcPath))
+            {
+                ChipLogError(NotSpecified, "BackChannel start failed for %s", bcPath);
+            }
+        }
+    }
+
     AttributeAccessInterfaceRegistry::Instance().Register(&gPowerAttrAccess);
+
+    // Pre-allocated camera slots (endpoints 3..10). Each has cluster server
+    // delegates registered for the four Matter 1.5 camera clusters; slots are
+    // disabled until AddCamera assigns one to a Swift Camera UUID.
+    MatterBridge::InitCameraSlots();
 }
 
 void ApplicationShutdown() {}
 
 int main(int argc, char * argv[])
 {
+    // MatterBridge: force stdout/stderr to line-buffered. Default block-buffering
+    // when our parent (Swift app) connects via a pipe means chip-thread log
+    // lines sit unflushed for tens of seconds — the IPC test then can't see
+    // "AddCamera: ..." until much later when other output happens to fill the
+    // buffer. Line-buffer ensures every newline-terminated log line reaches the
+    // parent immediately.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    setvbuf(stderr, nullptr, _IOLBF, 0);
+
     if (sChipNamedPipeCommands.Stop() != CHIP_NO_ERROR)
     {
         ChipLogError(NotSpecified, "Failed to stop CHIP NamedPipeCommands");
@@ -1107,6 +1272,11 @@ int main(int argc, char * argv[])
     ChipLinuxAppMainLoop();
     return 0;
 }
+
+// Camera slot management lives in MatterBridgeCameraSlots.{h,cpp}. The
+// HandleAddCamera/RemoveCamera/TriggerMotion/ClearMotion handlers there own
+// the pre-allocated slot endpoints (3..10) and the cluster-server delegates
+// for ZoneMgmt/AVStream/UserLevel/WebRTCProvider.
 
 BridgeAppCommandHandler * BridgeAppCommandHandler::FromJSON(const char * json)
 {
@@ -1145,6 +1315,41 @@ void BridgeAppCommandHandler::HandleCommand(intptr_t context)
     {
         uint32_t configVersion = Light1.GetConfigurationVersion() + 1;
         Light1.SetConfigurationVersion(configVersion);
+    }
+    else if (name == "AddCamera")
+    {
+        MatterBridge::HandleAddCamera(self->mJsonValue);
+    }
+    else if (name == "RemoveCamera")
+    {
+        MatterBridge::HandleRemoveCamera(self->mJsonValue);
+    }
+    else if (name == "TriggerMotion")
+    {
+        MatterBridge::HandleTriggerMotion(self->mJsonValue);
+    }
+    else if (name == "ClearMotion")
+    {
+        MatterBridge::HandleClearMotion(self->mJsonValue);
+    }
+    else if (name == "BackChannelPing")
+    {
+        // Test hook: tell the helper to issue a back-channel Request("Ping")
+        // and log the response. Used by integration tests.
+        Json::Value req(Json::objectValue);
+        req["Name"] = "Ping";
+        Json::Value resp;
+        bool ok = MatterBridge::GetBackChannel().Request(std::move(req), resp, 5000);
+        if (ok)
+        {
+            ChipLogProgress(NotSpecified, "BackChannelPing: response Status=%s",
+                            resp.get("Status", "missing").asString().c_str());
+        }
+        else
+        {
+            ChipLogError(NotSpecified, "BackChannelPing: no response (timeout or no client)");
+        }
+        fflush(stdout);
     }
     else
     {
