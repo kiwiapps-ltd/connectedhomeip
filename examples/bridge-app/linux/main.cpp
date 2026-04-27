@@ -1112,12 +1112,14 @@ void ApplicationInit()
         static_cast<int>(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1))) + 1);
     gCurrentEndpointId = gFirstDynamicEndpointId;
 
-    // Upstream bridge-app disables the last fixed endpoint as a "supported
-    // clusters" placeholder. With our per-slot endpoint-type merge, every
-    // slot independently carries the camera clusters, so the placeholder
-    // pattern isn't needed and disabling slot endpoint 10 would actively
-    // break the per-endpoint AAI dispatch for that slot.
-    // emberAfEndpointEnableDisable(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1)), false);
+    // Disable endpoint 2 (the upstream chip-bridge-app dimmable-light
+    // placeholder). With per-slot camera endpoint types, we don't need the
+    // placeholder pattern — and leaving endpoint 2 enabled makes
+    // SmartThings categorize the bridge as a Light with dimmer instead of
+    // surfacing the camera at slot endpoints. Endpoint 2 stays in ZAP for
+    // codegen (so LevelControl/OnOff cluster servers compile in), but the
+    // runtime endpoint is hidden.
+    emberAfEndpointEnableDisable(static_cast<chip::EndpointId>(2), false);
 
     // MatterBridge: the upstream chip-bridge-app example registers ~12 demo
     // endpoints (Light, TempSensor, Composed, Action lights). They show up

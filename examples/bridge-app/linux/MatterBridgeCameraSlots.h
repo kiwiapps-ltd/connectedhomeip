@@ -62,6 +62,11 @@ void InitCameraSlots();
 /// Look up a slot by Swift external id. Returns nullptr when not found.
 CameraSlot * FindSlotByExtId(const std::string & extId);
 
+/// Resolve a slot endpoint id back to the Swift camera UUID (extId). Empty
+/// string when no occupied slot exists at that endpoint. Used by the WebRTC
+/// back-channel to tell Swift which camera a session belongs to.
+std::string FindExtIdByEndpoint(chip::EndpointId ep);
+
 /// First slot with occupied=false, or nullptr if all 8 are taken.
 CameraSlot * FindFreeSlot();
 
