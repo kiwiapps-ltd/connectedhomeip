@@ -63,8 +63,21 @@ public:
     const std::vector<AudioStreamStruct> & GetAllocatedAudioStreams() const override { return mEmptyAudioStreams; }
 
     /// Used by WebRTCProviderDelegate to validate stream IDs.
-    bool HasVideoStream(uint16_t streamID) const;
-    bool HasAnyVideoStream() const { return !mAllocatedVideoStreams.empty(); }
+    ///
+    /// SmartThings's `WebRTC.ProvideOffer` arrives with a `VideoStreamID`
+    /// field whose value comes from a previous read of the
+    /// `AllocatedVideoStreams` attribute (which the cluster server
+    /// persists across reboots). Our in-memory `mAllocatedVideoStreams`
+    /// starts empty on each boot, so the strict `HasVideoStream` check
+    /// would reject every ProvideOffer with `DYNAMIC_CONSTRAINT_ERROR`.
+    ///
+    /// A bridged camera always exposes exactly one logical live stream
+    /// per slot. We don't multiplex stream IDs — every ProvideOffer
+    /// targets the same camera regardless of the requested ID. Always
+    /// answering "yes, that ID is valid" lets the negotiation proceed
+    /// to the SDP/ICE phase where the real frame pump takes over.
+    bool HasVideoStream(uint16_t /*streamID*/) const { return true; }
+    bool HasAnyVideoStream() const { return true; }
 
     /// Tag this delegate with its endpoint id at construction so the snapshot
     /// back-channel request can carry it (Swift needs to know which camera).

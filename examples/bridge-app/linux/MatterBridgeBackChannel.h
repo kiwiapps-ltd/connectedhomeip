@@ -39,6 +39,15 @@ public:
     /// Returns false if no client is currently connected.
     bool SendEvent(Json::Value && payload);
 
+    /// Register a handler for inbound notifications from Swift (frames whose
+    /// JSON has no `ResponseId`). The handler runs on the back-channel reader
+    /// thread; do non-trivial work via `DeviceLayer::SystemLayer().ScheduleLambda`.
+    void SetEventHandler(EventHandler h)
+    {
+        std::lock_guard<std::mutex> lk(mEventHandlerMutex);
+        mEventHandler = std::move(h);
+    }
+
     /// Send a request and wait for the matching response. Used by cluster
     /// delegates that need a synchronous answer (e.g. CaptureSnapshot).
     /// Returns false on timeout or disconnect; out is populated with the
@@ -73,6 +82,9 @@ private:
     std::mutex mPendingMutex;
     std::map<uint64_t, std::shared_ptr<Pending>> mPending;
     std::atomic<uint64_t> mNextRequestId{1};
+
+    std::mutex   mEventHandlerMutex;
+    EventHandler mEventHandler;
 };
 
 /// Process-wide singleton.

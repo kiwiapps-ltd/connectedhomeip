@@ -180,9 +180,20 @@ void BackChannel::ClientLoop(int fd)
             }
             continue;
         }
-        // Else: fire-and-forget event from Swift (for now, we just log).
-        ChipLogProgress(NotSpecified, "BackChannel inbound event: %s",
-                        msg.isMember("Name") ? msg["Name"].asString().c_str() : "(unnamed)");
+        // Fire-and-forget event from Swift. Dispatch to a registered handler
+        // (set up at startup to route e.g. WebRTC.LocalCandidate to the
+        // appropriate WebRTCProviderDelegate for outbound forwarding).
+        EventHandler handler;
+        {
+            std::lock_guard<std::mutex> lk(mEventHandlerMutex);
+            handler = mEventHandler;
+        }
+        if (handler) handler(msg);
+        else
+        {
+            ChipLogProgress(NotSpecified, "BackChannel inbound event (no handler): %s",
+                            msg.isMember("Name") ? msg["Name"].asString().c_str() : "(unnamed)");
+        }
     }
 }
 

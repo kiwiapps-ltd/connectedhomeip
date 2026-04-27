@@ -60,12 +60,6 @@ AVStreamDelegate::Status AVStreamDelegate::SnapshotStreamDeallocate(uint16_t str
     return Status::Success;
 }
 
-bool AVStreamDelegate::HasVideoStream(uint16_t streamID) const
-{
-    return std::any_of(mAllocatedVideoStreams.begin(), mAllocatedVideoStreams.end(),
-                       [streamID](const VideoStreamStruct & s) { return s.videoStreamID == streamID; });
-}
-
 AVStreamDelegate::Status AVStreamDelegate::CaptureSnapshot(const chip::app::DataModel::Nullable<uint16_t> streamID,
                                                             const VideoResolutionStruct & resolution,
                                                             ImageSnapshot & outImageSnapshot)
