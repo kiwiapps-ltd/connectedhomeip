@@ -49,75 +49,71 @@ void EncodeICEServers(const chip::Optional<std::vector<WebRTCProviderDelegate::I
     }
 }
 
-CHIP_ERROR ForwardOfferLike(const char * cmd, EndpointId ep,
-                            const WebRTCProviderDelegate::OfferRequestArgs & args,
-                            const std::string * sdp, // null for SolicitOffer, non-null for ProvideOffer
-                            WebRTCProviderDelegate::WebRTCSessionStruct & outSession,
-                            bool * outDeferred)
+} // anonymous namespace
+
+CHIP_ERROR WebRTCProviderDelegate::HandleSolicitOffer(const OfferRequestArgs & args, WebRTCSessionStruct & outSession,
+                                                      bool & outDeferredOffer)
 {
+    // Send everything we'd send for ProvideOffer minus the remote SDP, and
+    // expect Swift to return us a freshly-generated local SDP offer that
+    // we'll then ship to the controller via
+    // `WebRTCTransportRequestor.Offer`. Same code path as
+    // ForwardOfferLike but we extract the offer SDP to schedule the
+    // outbound command.
     Json::Value req(Json::objectValue);
-    req["Name"]                  = cmd;
-    req["Endpoint"]              = ep;
+    req["Name"]                  = "WebRTC.SolicitOffer";
+    req["Endpoint"]              = mEndpointId;
     req["SessionId"]             = args.sessionId;
     req["StreamUsage"]           = static_cast<int>(args.streamUsage);
     req["PeerNodeId"]            = static_cast<Json::UInt64>(args.peerNodeId);
     req["FabricIndex"]           = args.fabricIndex;
     req["OriginatingEndpointId"] = args.originatingEndpointId;
     {
-        // Tell Swift which camera (UUID) this session belongs to so the
-        // frame pump can look up the RTSP URL by Camera.id rather than
-        // having to maintain a separate endpoint→UUID mapping.
-        auto extId = FindExtIdByEndpoint(ep);
+        auto extId = FindExtIdByEndpoint(mEndpointId);
         if (!extId.empty()) req["CameraId"] = extId;
     }
-
     if (args.videoStreamId.HasValue() && !args.videoStreamId.Value().IsNull())
         req["VideoStreamId"] = args.videoStreamId.Value().Value();
     if (args.audioStreamId.HasValue() && !args.audioStreamId.Value().IsNull())
         req["AudioStreamId"] = args.audioStreamId.Value().Value();
-    if (sdp) req["SDP"] = *sdp;
     EncodeICEServers(args.iceServers, req["IceServers"]);
     if (args.iceTransportPolicy.HasValue()) req["IceTransportPolicy"] = args.iceTransportPolicy.Value();
 
     Json::Value resp;
-    // 30s is generous but accounts for libwebrtc's first-call cold-start
-    // (factory init + 8KB SDP parse + answer generation can exceed 15s on
-    // macOS for the very first session).
     if (!GetBackChannel().Request(std::move(req), resp, /*timeoutMs=*/30000))
     {
-        ChipLogError(NotSpecified, "WebRTC %s: back-channel timeout", cmd);
+        ChipLogError(NotSpecified, "WebRTC SolicitOffer: back-channel timeout");
         return CHIP_ERROR_TIMEOUT;
     }
     if (resp.get("Status", "error").asString() != "ok")
     {
-        ChipLogError(NotSpecified, "WebRTC %s: rejected by Swift: %s", cmd,
+        ChipLogError(NotSpecified, "WebRTC SolicitOffer: rejected by Swift: %s",
                      resp.get("Reason", "?").asString().c_str());
         return CHIP_ERROR_INTERNAL;
     }
 
-    outSession.id          = static_cast<uint16_t>(resp.get("SessionId", args.sessionId).asUInt());
-    outSession.peerNodeID  = args.peerNodeId;
-    outSession.peerEndpointID = args.originatingEndpointId;
-    outSession.streamUsage = args.streamUsage;
-    outSession.videoStreamID = chip::app::DataModel::Nullable<uint16_t>();
-    outSession.audioStreamID = chip::app::DataModel::Nullable<uint16_t>();
-    if (resp.isMember("VideoStreamId") && resp["VideoStreamId"].isUInt())
-        outSession.videoStreamID.SetNonNull(static_cast<uint16_t>(resp["VideoStreamId"].asUInt()));
-    if (resp.isMember("AudioStreamId") && resp["AudioStreamId"].isUInt())
-        outSession.audioStreamID.SetNonNull(static_cast<uint16_t>(resp["AudioStreamId"].asUInt()));
+    const uint16_t assignedSessionId = static_cast<uint16_t>(resp.get("SessionId", args.sessionId).asUInt());
+    outSession.id              = assignedSessionId;
+    outSession.peerNodeID      = args.peerNodeId;
+    outSession.peerEndpointID  = args.originatingEndpointId;
+    outSession.streamUsage     = args.streamUsage;
+    outSession.videoStreamID   = chip::app::DataModel::Nullable<uint16_t>();
+    outSession.audioStreamID   = chip::app::DataModel::Nullable<uint16_t>();
     outSession.metadataEnabled = false;
     outSession.fabricIndex     = args.fabricIndex;
+    outDeferredOffer = resp.get("Deferred", true).asBool();
 
-    if (outDeferred) *outDeferred = resp.get("Deferred", false).asBool();
+    const std::string sdpOffer = resp.get("SDP", "").asString();
+    if (!sdpOffer.empty())
+    {
+        std::lock_guard<std::mutex> lk(mSessionsMutex);
+        auto & state = mSessions[assignedSessionId];
+        state.peerId                = ScopedNodeId(args.peerNodeId, args.fabricIndex);
+        state.originatingEndpointId = args.originatingEndpointId;
+        state.sdpAnswer             = sdpOffer; // reuse field for outbound SDP
+        ScheduleSendOffer(assignedSessionId);
+    }
     return CHIP_NO_ERROR;
-}
-
-} // anonymous namespace
-
-CHIP_ERROR WebRTCProviderDelegate::HandleSolicitOffer(const OfferRequestArgs & args, WebRTCSessionStruct & outSession,
-                                                      bool & outDeferredOffer)
-{
-    return ForwardOfferLike("WebRTC.SolicitOffer", mEndpointId, args, /*sdp=*/nullptr, outSession, &outDeferredOffer);
 }
 
 CHIP_ERROR WebRTCProviderDelegate::HandleProvideOffer(const ProvideOfferRequestArgs & args, WebRTCSessionStruct & outSession)
@@ -321,6 +317,30 @@ void WebRTCProviderDelegate::ScheduleSendAnswer(uint16_t sessionId)
     });
 }
 
+void WebRTCProviderDelegate::ScheduleSendOffer(uint16_t sessionId)
+{
+    DeviceLayer::SystemLayer().ScheduleLambda([this, sessionId]() {
+        ScopedNodeId peerId;
+        {
+            std::lock_guard<std::mutex> lk(mSessionsMutex);
+            auto * s = GetSession(sessionId);
+            if (!s)
+            {
+                ChipLogError(NotSpecified, "ScheduleSendOffer: no session %u", sessionId);
+                return;
+            }
+            s->pendingCommand = PendingSession::Pending::kOffer;
+            peerId            = s->peerId;
+            mPeerToSessionId[peerId] = sessionId;
+        }
+        ChipLogProgress(NotSpecified, "WebRTC: establishing CASE to send Offer for session %u", sessionId);
+        auto * mgr = Server::GetInstance().GetCASESessionManager();
+        VerifyOrReturn(mgr != nullptr, ChipLogError(NotSpecified, "ScheduleSendOffer: no CASE manager"));
+        mgr->FindOrEstablishSession(peerId, &mOnConnectedCallback, &mOnConnectionFailureCallback,
+                                     TransportPayloadCapability::kLargePayload);
+    });
+}
+
 void WebRTCProviderDelegate::ScheduleSendIceCandidates(uint16_t sessionId)
 {
     DeviceLayer::SystemLayer().ScheduleLambda([this, sessionId]() {
@@ -411,6 +431,9 @@ void WebRTCProviderDelegate::OnDeviceConnected(void * context, Messaging::Exchan
     case PendingSession::Pending::kAnswer:
         (void) self->SendAnswerCommand(exchangeMgr, sessionHandle, sessionId);
         break;
+    case PendingSession::Pending::kOffer:
+        (void) self->SendOfferCommand(exchangeMgr, sessionHandle, sessionId);
+        break;
     case PendingSession::Pending::kIce:
         (void) self->SendICECandidatesCommand(exchangeMgr, sessionHandle, sessionId);
         break;
@@ -450,6 +473,40 @@ CHIP_ERROR WebRTCProviderDelegate::SendAnswerCommand(Messaging::ExchangeManager 
     };
     auto onFailure = [sessionId](CHIP_ERROR err) {
         ChipLogError(NotSpecified, "WebRTC: Answer command failed for session %u: %" CHIP_ERROR_FORMAT,
+                     sessionId, err.Format());
+    };
+
+    return Controller::InvokeCommandRequest(&exchangeMgr, sessionHandle, endpointId, cmd,
+                                             onSuccess, onFailure,
+                                             /*timedInvokeTimeoutMs=*/NullOptional,
+                                             /*responseTimeout=*/NullOptional,
+                                             /*outCancelFn=*/nullptr,
+                                             /*allowLargePayload=*/true);
+}
+
+CHIP_ERROR WebRTCProviderDelegate::SendOfferCommand(Messaging::ExchangeManager & exchangeMgr,
+                                                    const SessionHandle & sessionHandle, uint16_t sessionId)
+{
+    chip::EndpointId endpointId = chip::kRootEndpointId;
+    std::string      sdp;
+    {
+        std::lock_guard<std::mutex> lk(mSessionsMutex);
+        auto * s = GetSession(sessionId);
+        if (!s) return CHIP_ERROR_INTERNAL;
+        endpointId = s->originatingEndpointId;
+        sdp        = s->sdpAnswer;
+        s->pendingCommand = PendingSession::Pending::kNone;
+    }
+
+    WebRTCTransportRequestor::Commands::Offer::Type cmd;
+    cmd.webRTCSessionID = sessionId;
+    cmd.sdp             = chip::CharSpan(sdp.data(), sdp.size());
+
+    auto onSuccess = [sessionId](const ConcreteCommandPath &, const StatusIB &, const auto &) {
+        ChipLogProgress(NotSpecified, "WebRTC: Offer command succeeded for session %u", sessionId);
+    };
+    auto onFailure = [sessionId](CHIP_ERROR err) {
+        ChipLogError(NotSpecified, "WebRTC: Offer command failed for session %u: %" CHIP_ERROR_FORMAT,
                      sessionId, err.Format());
     };
 
