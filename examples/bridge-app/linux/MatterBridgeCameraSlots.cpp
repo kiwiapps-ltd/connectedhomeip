@@ -426,6 +426,12 @@ void HandleRemoveCamera(const Json::Value & cmd)
     fflush(stdout);
 }
 
+// Default zone the bridge auto-publishes per camera. ID is reserved by the
+// Matter spec for built-in motion zones; SmartThings (and other
+// controllers) can subscribe to ZoneTriggered/ZoneStopped events keyed by
+// this ID without the bridge needing to expose a zone editor UI.
+static constexpr uint16_t kDefaultMotionZoneId = 1;
+
 void HandleTriggerMotion(const Json::Value & cmd)
 {
     if (!cmd.isMember("Id") || !cmd["Id"].isString()) return;
@@ -438,6 +444,18 @@ void HandleTriggerMotion(const Json::Value & cmd)
                           &value, ZCL_BITMAP8_ATTRIBUTE_TYPE);
     MatterReportingAttributeChangeCallback(slot->endpointId, OccupancySensing::Id,
                                            OccupancySensing::Attributes::Occupancy::Id);
+    if (slot->zoneServer)
+    {
+        // Emit a ZoneManagement.ZoneTriggered event so SmartThings (and
+        // any other controller) can build automations on per-zone motion
+        // edges instead of polling Occupancy. This pairs with the
+        // Occupancy attribute write above; consumers that care about
+        // event-style timestamps + per-zone routing get the event,
+        // consumers that only sample state get the attribute.
+        (void) slot->zoneServer->GenerateZoneTriggeredEvent(
+            kDefaultMotionZoneId,
+            chip::app::Clusters::ZoneManagement::ZoneEventTriggeredReasonEnum::kMotion);
+    }
     ChipLogProgress(NotSpecified, "TriggerMotion: id='%s' endpoint=%u",
                     cmd["Id"].asString().c_str(), slot->endpointId);
     fflush(stdout);
@@ -455,6 +473,12 @@ void HandleClearMotion(const Json::Value & cmd)
                           &value, ZCL_BITMAP8_ATTRIBUTE_TYPE);
     MatterReportingAttributeChangeCallback(slot->endpointId, OccupancySensing::Id,
                                            OccupancySensing::Attributes::Occupancy::Id);
+    if (slot->zoneServer)
+    {
+        (void) slot->zoneServer->GenerateZoneStoppedEvent(
+            kDefaultMotionZoneId,
+            chip::app::Clusters::ZoneManagement::ZoneEventStoppedReasonEnum::kActionStopped);
+    }
     ChipLogProgress(NotSpecified, "ClearMotion: id='%s' endpoint=%u",
                     cmd["Id"].asString().c_str(), slot->endpointId);
     fflush(stdout);

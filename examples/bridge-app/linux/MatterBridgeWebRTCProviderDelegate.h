@@ -97,18 +97,21 @@ private:
         std::vector<std::string> iceMidStrings;
         // What outbound cluster command this CASE session establish was
         // requested for. Used in the OnDeviceConnected callback dispatch.
-        enum class Pending { kNone, kAnswer, kIce, kEnd };
+        enum class Pending { kNone, kAnswer, kOffer, kIce, kEnd };
         Pending pendingCommand = Pending::kNone;
     };
 
     PendingSession * GetSession(uint16_t sessionId);
     void ScheduleSendAnswer(uint16_t sessionId);
+    void ScheduleSendOffer(uint16_t sessionId);
     void ScheduleSendIceCandidates(uint16_t sessionId);
     static void OnDeviceConnected(void * context, chip::Messaging::ExchangeManager & exchangeMgr,
                                    const chip::SessionHandle & sessionHandle);
     static void OnDeviceConnectionFailure(void * context, const chip::ScopedNodeId & peerId, CHIP_ERROR error);
     CHIP_ERROR SendAnswerCommand(chip::Messaging::ExchangeManager & exchangeMgr,
                                   const chip::SessionHandle & sessionHandle, uint16_t sessionId);
+    CHIP_ERROR SendOfferCommand(chip::Messaging::ExchangeManager & exchangeMgr,
+                                 const chip::SessionHandle & sessionHandle, uint16_t sessionId);
     CHIP_ERROR SendICECandidatesCommand(chip::Messaging::ExchangeManager & exchangeMgr,
                                          const chip::SessionHandle & sessionHandle, uint16_t sessionId);
 
