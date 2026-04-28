@@ -5043,5 +5043,769 @@ endpoint 10 {
     handle command EndSession;
   }
 }
+endpoint 11 {
+  device type ma_bridgednode = 19, version 1;
+  device type ma_camera = 322, version 1;
+
+  binding cluster WebRTCTransportRequestor;
+
+  server cluster Identify {
+    callback attribute identifyTime;
+    callback attribute identifyType;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command Identify;
+    handle command TriggerEffect;
+  }
+
+  server cluster Descriptor {
+    callback attribute deviceTypeList;
+    callback attribute serverList;
+    callback attribute clientList;
+    callback attribute partsList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster BridgedDeviceBasicInformation {
+    emits event StartUp;
+    emits event ShutDown;
+    emits event Leave;
+    ram      attribute vendorName;
+    ram      attribute vendorID;
+    ram      attribute productName;
+    persist  attribute nodeLabel;
+    ram      attribute hardwareVersion default = 0;
+    ram      attribute hardwareVersionString;
+    ram      attribute softwareVersion default = 0;
+    ram      attribute softwareVersionString;
+    ram      attribute manufacturingDate default = "20210614123456ZZ";
+    ram      attribute partNumber;
+    ram      attribute productURL;
+    ram      attribute productLabel;
+    ram      attribute serialNumber;
+    ram      attribute reachable default = 1;
+    ram      attribute uniqueID;
+    callback attribute productAppearance;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 0x0005;
+  }
+
+  server cluster OccupancySensing {
+    ram      attribute occupancy default = 0;
+    ram      attribute occupancySensorType default = 0;
+    ram      attribute occupancySensorTypeBitmap default = 0x1;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster ZoneManagement {
+    emits event ZoneTriggered;
+    emits event ZoneStopped;
+    callback attribute maxUserDefinedZones;
+    callback attribute maxZones;
+    callback attribute zones;
+    callback attribute triggers;
+    callback attribute sensitivityMax;
+    callback attribute sensitivity;
+    callback attribute twoDCartesianMax;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command CreateTwoDCartesianZone;
+    handle command CreateTwoDCartesianZoneResponse;
+    handle command UpdateTwoDCartesianZone;
+    handle command RemoveZone;
+    handle command CreateOrUpdateTrigger;
+    handle command RemoveTrigger;
+  }
+
+  server cluster CameraAvStreamManagement {
+    callback attribute maxConcurrentEncoders;
+    callback attribute maxEncodedPixelRate;
+    callback attribute videoSensorParams;
+    callback attribute nightVisionUsesInfrared;
+    callback attribute minViewportResolution;
+    callback attribute rateDistortionTradeOffPoints;
+    callback attribute maxContentBufferSize;
+    callback attribute microphoneCapabilities;
+    callback attribute speakerCapabilities;
+    callback attribute twoWayTalkSupport;
+    callback attribute snapshotCapabilities;
+    callback attribute maxNetworkBandwidth;
+    callback attribute currentFrameRate;
+    callback attribute HDRModeEnabled;
+    callback attribute supportedStreamUsages;
+    callback attribute allocatedVideoStreams;
+    callback attribute allocatedAudioStreams;
+    callback attribute allocatedSnapshotStreams;
+    callback attribute streamUsagePriorities;
+    callback attribute softRecordingPrivacyModeEnabled;
+    callback attribute softLivestreamPrivacyModeEnabled;
+    callback attribute hardPrivacyModeOn;
+    callback attribute nightVision;
+    callback attribute nightVisionIllum;
+    callback attribute viewport;
+    callback attribute speakerMuted;
+    callback attribute speakerVolumeLevel;
+    callback attribute speakerMaxLevel;
+    callback attribute speakerMinLevel;
+    callback attribute microphoneMuted;
+    callback attribute microphoneVolumeLevel;
+    callback attribute microphoneMaxLevel;
+    callback attribute microphoneMinLevel;
+    callback attribute microphoneAGCEnabled;
+    callback attribute imageRotation;
+    callback attribute imageFlipHorizontal;
+    callback attribute imageFlipVertical;
+    callback attribute localVideoRecordingEnabled;
+    callback attribute localSnapshotRecordingEnabled;
+    callback attribute statusLightEnabled;
+    callback attribute statusLightBrightness;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command AudioStreamAllocate;
+    handle command AudioStreamAllocateResponse;
+    handle command AudioStreamDeallocate;
+    handle command VideoStreamAllocate;
+    handle command VideoStreamAllocateResponse;
+    handle command VideoStreamModify;
+    handle command VideoStreamDeallocate;
+    handle command SnapshotStreamAllocate;
+    handle command SnapshotStreamAllocateResponse;
+    handle command SnapshotStreamModify;
+    handle command SnapshotStreamDeallocate;
+    handle command SetStreamPriorities;
+    handle command CaptureSnapshot;
+    handle command CaptureSnapshotResponse;
+  }
+
+  server cluster CameraAvSettingsUserLevelManagement {
+    callback attribute MPTZPosition;
+    ram      attribute maxPresets default = 5;
+    callback attribute MPTZPresets;
+    callback attribute DPTZStreams;
+    ram      attribute zoomMax default = 100;
+    ram      attribute tiltMin default = -90;
+    ram      attribute tiltMax default = 90;
+    ram      attribute panMin default = -180;
+    ram      attribute panMax default = 180;
+    ram      attribute movementState;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 31;
+    ram      attribute clusterRevision default = 1;
+
+    handle command MPTZSetPosition;
+    handle command MPTZRelativeMove;
+    handle command MPTZMoveToPreset;
+    handle command MPTZSavePreset;
+    handle command MPTZRemovePreset;
+    handle command DPTZSetViewport;
+    handle command DPTZRelativeMove;
+  }
+
+  server cluster WebRTCTransportProvider {
+    callback attribute currentSessions;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command SolicitOffer;
+    handle command SolicitOfferResponse;
+    handle command ProvideOffer;
+    handle command ProvideOfferResponse;
+    handle command ProvideAnswer;
+    handle command ProvideICECandidates;
+    handle command EndSession;
+  }
+}
+endpoint 12 {
+  device type ma_bridgednode = 19, version 1;
+  device type ma_camera = 322, version 1;
+
+  binding cluster WebRTCTransportRequestor;
+
+  server cluster Identify {
+    callback attribute identifyTime;
+    callback attribute identifyType;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command Identify;
+    handle command TriggerEffect;
+  }
+
+  server cluster Descriptor {
+    callback attribute deviceTypeList;
+    callback attribute serverList;
+    callback attribute clientList;
+    callback attribute partsList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster BridgedDeviceBasicInformation {
+    emits event StartUp;
+    emits event ShutDown;
+    emits event Leave;
+    ram      attribute vendorName;
+    ram      attribute vendorID;
+    ram      attribute productName;
+    persist  attribute nodeLabel;
+    ram      attribute hardwareVersion default = 0;
+    ram      attribute hardwareVersionString;
+    ram      attribute softwareVersion default = 0;
+    ram      attribute softwareVersionString;
+    ram      attribute manufacturingDate default = "20210614123456ZZ";
+    ram      attribute partNumber;
+    ram      attribute productURL;
+    ram      attribute productLabel;
+    ram      attribute serialNumber;
+    ram      attribute reachable default = 1;
+    ram      attribute uniqueID;
+    callback attribute productAppearance;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 0x0005;
+  }
+
+  server cluster OccupancySensing {
+    ram      attribute occupancy default = 0;
+    ram      attribute occupancySensorType default = 0;
+    ram      attribute occupancySensorTypeBitmap default = 0x1;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster ZoneManagement {
+    emits event ZoneTriggered;
+    emits event ZoneStopped;
+    callback attribute maxUserDefinedZones;
+    callback attribute maxZones;
+    callback attribute zones;
+    callback attribute triggers;
+    callback attribute sensitivityMax;
+    callback attribute sensitivity;
+    callback attribute twoDCartesianMax;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command CreateTwoDCartesianZone;
+    handle command CreateTwoDCartesianZoneResponse;
+    handle command UpdateTwoDCartesianZone;
+    handle command RemoveZone;
+    handle command CreateOrUpdateTrigger;
+    handle command RemoveTrigger;
+  }
+
+  server cluster CameraAvStreamManagement {
+    callback attribute maxConcurrentEncoders;
+    callback attribute maxEncodedPixelRate;
+    callback attribute videoSensorParams;
+    callback attribute nightVisionUsesInfrared;
+    callback attribute minViewportResolution;
+    callback attribute rateDistortionTradeOffPoints;
+    callback attribute maxContentBufferSize;
+    callback attribute microphoneCapabilities;
+    callback attribute speakerCapabilities;
+    callback attribute twoWayTalkSupport;
+    callback attribute snapshotCapabilities;
+    callback attribute maxNetworkBandwidth;
+    callback attribute currentFrameRate;
+    callback attribute HDRModeEnabled;
+    callback attribute supportedStreamUsages;
+    callback attribute allocatedVideoStreams;
+    callback attribute allocatedAudioStreams;
+    callback attribute allocatedSnapshotStreams;
+    callback attribute streamUsagePriorities;
+    callback attribute softRecordingPrivacyModeEnabled;
+    callback attribute softLivestreamPrivacyModeEnabled;
+    callback attribute hardPrivacyModeOn;
+    callback attribute nightVision;
+    callback attribute nightVisionIllum;
+    callback attribute viewport;
+    callback attribute speakerMuted;
+    callback attribute speakerVolumeLevel;
+    callback attribute speakerMaxLevel;
+    callback attribute speakerMinLevel;
+    callback attribute microphoneMuted;
+    callback attribute microphoneVolumeLevel;
+    callback attribute microphoneMaxLevel;
+    callback attribute microphoneMinLevel;
+    callback attribute microphoneAGCEnabled;
+    callback attribute imageRotation;
+    callback attribute imageFlipHorizontal;
+    callback attribute imageFlipVertical;
+    callback attribute localVideoRecordingEnabled;
+    callback attribute localSnapshotRecordingEnabled;
+    callback attribute statusLightEnabled;
+    callback attribute statusLightBrightness;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command AudioStreamAllocate;
+    handle command AudioStreamAllocateResponse;
+    handle command AudioStreamDeallocate;
+    handle command VideoStreamAllocate;
+    handle command VideoStreamAllocateResponse;
+    handle command VideoStreamModify;
+    handle command VideoStreamDeallocate;
+    handle command SnapshotStreamAllocate;
+    handle command SnapshotStreamAllocateResponse;
+    handle command SnapshotStreamModify;
+    handle command SnapshotStreamDeallocate;
+    handle command SetStreamPriorities;
+    handle command CaptureSnapshot;
+    handle command CaptureSnapshotResponse;
+  }
+
+  server cluster CameraAvSettingsUserLevelManagement {
+    callback attribute MPTZPosition;
+    ram      attribute maxPresets default = 5;
+    callback attribute MPTZPresets;
+    callback attribute DPTZStreams;
+    ram      attribute zoomMax default = 100;
+    ram      attribute tiltMin default = -90;
+    ram      attribute tiltMax default = 90;
+    ram      attribute panMin default = -180;
+    ram      attribute panMax default = 180;
+    ram      attribute movementState;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 31;
+    ram      attribute clusterRevision default = 1;
+
+    handle command MPTZSetPosition;
+    handle command MPTZRelativeMove;
+    handle command MPTZMoveToPreset;
+    handle command MPTZSavePreset;
+    handle command MPTZRemovePreset;
+    handle command DPTZSetViewport;
+    handle command DPTZRelativeMove;
+  }
+
+  server cluster WebRTCTransportProvider {
+    callback attribute currentSessions;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command SolicitOffer;
+    handle command SolicitOfferResponse;
+    handle command ProvideOffer;
+    handle command ProvideOfferResponse;
+    handle command ProvideAnswer;
+    handle command ProvideICECandidates;
+    handle command EndSession;
+  }
+}
+endpoint 13 {
+  device type ma_bridgednode = 19, version 1;
+  device type ma_camera = 322, version 1;
+
+  binding cluster WebRTCTransportRequestor;
+
+  server cluster Identify {
+    callback attribute identifyTime;
+    callback attribute identifyType;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command Identify;
+    handle command TriggerEffect;
+  }
+
+  server cluster Descriptor {
+    callback attribute deviceTypeList;
+    callback attribute serverList;
+    callback attribute clientList;
+    callback attribute partsList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster BridgedDeviceBasicInformation {
+    emits event StartUp;
+    emits event ShutDown;
+    emits event Leave;
+    ram      attribute vendorName;
+    ram      attribute vendorID;
+    ram      attribute productName;
+    persist  attribute nodeLabel;
+    ram      attribute hardwareVersion default = 0;
+    ram      attribute hardwareVersionString;
+    ram      attribute softwareVersion default = 0;
+    ram      attribute softwareVersionString;
+    ram      attribute manufacturingDate default = "20210614123456ZZ";
+    ram      attribute partNumber;
+    ram      attribute productURL;
+    ram      attribute productLabel;
+    ram      attribute serialNumber;
+    ram      attribute reachable default = 1;
+    ram      attribute uniqueID;
+    callback attribute productAppearance;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 0x0005;
+  }
+
+  server cluster OccupancySensing {
+    ram      attribute occupancy default = 0;
+    ram      attribute occupancySensorType default = 0;
+    ram      attribute occupancySensorTypeBitmap default = 0x1;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster ZoneManagement {
+    emits event ZoneTriggered;
+    emits event ZoneStopped;
+    callback attribute maxUserDefinedZones;
+    callback attribute maxZones;
+    callback attribute zones;
+    callback attribute triggers;
+    callback attribute sensitivityMax;
+    callback attribute sensitivity;
+    callback attribute twoDCartesianMax;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command CreateTwoDCartesianZone;
+    handle command CreateTwoDCartesianZoneResponse;
+    handle command UpdateTwoDCartesianZone;
+    handle command RemoveZone;
+    handle command CreateOrUpdateTrigger;
+    handle command RemoveTrigger;
+  }
+
+  server cluster CameraAvStreamManagement {
+    callback attribute maxConcurrentEncoders;
+    callback attribute maxEncodedPixelRate;
+    callback attribute videoSensorParams;
+    callback attribute nightVisionUsesInfrared;
+    callback attribute minViewportResolution;
+    callback attribute rateDistortionTradeOffPoints;
+    callback attribute maxContentBufferSize;
+    callback attribute microphoneCapabilities;
+    callback attribute speakerCapabilities;
+    callback attribute twoWayTalkSupport;
+    callback attribute snapshotCapabilities;
+    callback attribute maxNetworkBandwidth;
+    callback attribute currentFrameRate;
+    callback attribute HDRModeEnabled;
+    callback attribute supportedStreamUsages;
+    callback attribute allocatedVideoStreams;
+    callback attribute allocatedAudioStreams;
+    callback attribute allocatedSnapshotStreams;
+    callback attribute streamUsagePriorities;
+    callback attribute softRecordingPrivacyModeEnabled;
+    callback attribute softLivestreamPrivacyModeEnabled;
+    callback attribute hardPrivacyModeOn;
+    callback attribute nightVision;
+    callback attribute nightVisionIllum;
+    callback attribute viewport;
+    callback attribute speakerMuted;
+    callback attribute speakerVolumeLevel;
+    callback attribute speakerMaxLevel;
+    callback attribute speakerMinLevel;
+    callback attribute microphoneMuted;
+    callback attribute microphoneVolumeLevel;
+    callback attribute microphoneMaxLevel;
+    callback attribute microphoneMinLevel;
+    callback attribute microphoneAGCEnabled;
+    callback attribute imageRotation;
+    callback attribute imageFlipHorizontal;
+    callback attribute imageFlipVertical;
+    callback attribute localVideoRecordingEnabled;
+    callback attribute localSnapshotRecordingEnabled;
+    callback attribute statusLightEnabled;
+    callback attribute statusLightBrightness;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command AudioStreamAllocate;
+    handle command AudioStreamAllocateResponse;
+    handle command AudioStreamDeallocate;
+    handle command VideoStreamAllocate;
+    handle command VideoStreamAllocateResponse;
+    handle command VideoStreamModify;
+    handle command VideoStreamDeallocate;
+    handle command SnapshotStreamAllocate;
+    handle command SnapshotStreamAllocateResponse;
+    handle command SnapshotStreamModify;
+    handle command SnapshotStreamDeallocate;
+    handle command SetStreamPriorities;
+    handle command CaptureSnapshot;
+    handle command CaptureSnapshotResponse;
+  }
+
+  server cluster CameraAvSettingsUserLevelManagement {
+    callback attribute MPTZPosition;
+    ram      attribute maxPresets default = 5;
+    callback attribute MPTZPresets;
+    callback attribute DPTZStreams;
+    ram      attribute zoomMax default = 100;
+    ram      attribute tiltMin default = -90;
+    ram      attribute tiltMax default = 90;
+    ram      attribute panMin default = -180;
+    ram      attribute panMax default = 180;
+    ram      attribute movementState;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 31;
+    ram      attribute clusterRevision default = 1;
+
+    handle command MPTZSetPosition;
+    handle command MPTZRelativeMove;
+    handle command MPTZMoveToPreset;
+    handle command MPTZSavePreset;
+    handle command MPTZRemovePreset;
+    handle command DPTZSetViewport;
+    handle command DPTZRelativeMove;
+  }
+
+  server cluster WebRTCTransportProvider {
+    callback attribute currentSessions;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command SolicitOffer;
+    handle command SolicitOfferResponse;
+    handle command ProvideOffer;
+    handle command ProvideOfferResponse;
+    handle command ProvideAnswer;
+    handle command ProvideICECandidates;
+    handle command EndSession;
+  }
+}
+endpoint 14 {
+  device type ma_bridgednode = 19, version 1;
+  device type ma_camera = 322, version 1;
+
+  binding cluster WebRTCTransportRequestor;
+
+  server cluster Identify {
+    callback attribute identifyTime;
+    callback attribute identifyType;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command Identify;
+    handle command TriggerEffect;
+  }
+
+  server cluster Descriptor {
+    callback attribute deviceTypeList;
+    callback attribute serverList;
+    callback attribute clientList;
+    callback attribute partsList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster BridgedDeviceBasicInformation {
+    emits event StartUp;
+    emits event ShutDown;
+    emits event Leave;
+    ram      attribute vendorName;
+    ram      attribute vendorID;
+    ram      attribute productName;
+    persist  attribute nodeLabel;
+    ram      attribute hardwareVersion default = 0;
+    ram      attribute hardwareVersionString;
+    ram      attribute softwareVersion default = 0;
+    ram      attribute softwareVersionString;
+    ram      attribute manufacturingDate default = "20210614123456ZZ";
+    ram      attribute partNumber;
+    ram      attribute productURL;
+    ram      attribute productLabel;
+    ram      attribute serialNumber;
+    ram      attribute reachable default = 1;
+    ram      attribute uniqueID;
+    callback attribute productAppearance;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 0x0005;
+  }
+
+  server cluster OccupancySensing {
+    ram      attribute occupancy default = 0;
+    ram      attribute occupancySensorType default = 0;
+    ram      attribute occupancySensorTypeBitmap default = 0x1;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+  }
+
+  server cluster ZoneManagement {
+    emits event ZoneTriggered;
+    emits event ZoneStopped;
+    callback attribute maxUserDefinedZones;
+    callback attribute maxZones;
+    callback attribute zones;
+    callback attribute triggers;
+    callback attribute sensitivityMax;
+    callback attribute sensitivity;
+    callback attribute twoDCartesianMax;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    callback attribute clusterRevision;
+
+    handle command CreateTwoDCartesianZone;
+    handle command CreateTwoDCartesianZoneResponse;
+    handle command UpdateTwoDCartesianZone;
+    handle command RemoveZone;
+    handle command CreateOrUpdateTrigger;
+    handle command RemoveTrigger;
+  }
+
+  server cluster CameraAvStreamManagement {
+    callback attribute maxConcurrentEncoders;
+    callback attribute maxEncodedPixelRate;
+    callback attribute videoSensorParams;
+    callback attribute nightVisionUsesInfrared;
+    callback attribute minViewportResolution;
+    callback attribute rateDistortionTradeOffPoints;
+    callback attribute maxContentBufferSize;
+    callback attribute microphoneCapabilities;
+    callback attribute speakerCapabilities;
+    callback attribute twoWayTalkSupport;
+    callback attribute snapshotCapabilities;
+    callback attribute maxNetworkBandwidth;
+    callback attribute currentFrameRate;
+    callback attribute HDRModeEnabled;
+    callback attribute supportedStreamUsages;
+    callback attribute allocatedVideoStreams;
+    callback attribute allocatedAudioStreams;
+    callback attribute allocatedSnapshotStreams;
+    callback attribute streamUsagePriorities;
+    callback attribute softRecordingPrivacyModeEnabled;
+    callback attribute softLivestreamPrivacyModeEnabled;
+    callback attribute hardPrivacyModeOn;
+    callback attribute nightVision;
+    callback attribute nightVisionIllum;
+    callback attribute viewport;
+    callback attribute speakerMuted;
+    callback attribute speakerVolumeLevel;
+    callback attribute speakerMaxLevel;
+    callback attribute speakerMinLevel;
+    callback attribute microphoneMuted;
+    callback attribute microphoneVolumeLevel;
+    callback attribute microphoneMaxLevel;
+    callback attribute microphoneMinLevel;
+    callback attribute microphoneAGCEnabled;
+    callback attribute imageRotation;
+    callback attribute imageFlipHorizontal;
+    callback attribute imageFlipVertical;
+    callback attribute localVideoRecordingEnabled;
+    callback attribute localSnapshotRecordingEnabled;
+    callback attribute statusLightEnabled;
+    callback attribute statusLightBrightness;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command AudioStreamAllocate;
+    handle command AudioStreamAllocateResponse;
+    handle command AudioStreamDeallocate;
+    handle command VideoStreamAllocate;
+    handle command VideoStreamAllocateResponse;
+    handle command VideoStreamModify;
+    handle command VideoStreamDeallocate;
+    handle command SnapshotStreamAllocate;
+    handle command SnapshotStreamAllocateResponse;
+    handle command SnapshotStreamModify;
+    handle command SnapshotStreamDeallocate;
+    handle command SetStreamPriorities;
+    handle command CaptureSnapshot;
+    handle command CaptureSnapshotResponse;
+  }
+
+  server cluster CameraAvSettingsUserLevelManagement {
+    callback attribute MPTZPosition;
+    ram      attribute maxPresets default = 5;
+    callback attribute MPTZPresets;
+    callback attribute DPTZStreams;
+    ram      attribute zoomMax default = 100;
+    ram      attribute tiltMin default = -90;
+    ram      attribute tiltMax default = 90;
+    ram      attribute panMin default = -180;
+    ram      attribute panMax default = 180;
+    ram      attribute movementState;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 31;
+    ram      attribute clusterRevision default = 1;
+
+    handle command MPTZSetPosition;
+    handle command MPTZRelativeMove;
+    handle command MPTZMoveToPreset;
+    handle command MPTZSavePreset;
+    handle command MPTZRemovePreset;
+    handle command DPTZSetViewport;
+    handle command DPTZRelativeMove;
+  }
+
+  server cluster WebRTCTransportProvider {
+    callback attribute currentSessions;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    callback attribute featureMap;
+    ram      attribute clusterRevision default = 1;
+
+    handle command SolicitOffer;
+    handle command SolicitOfferResponse;
+    handle command ProvideOffer;
+    handle command ProvideOfferResponse;
+    handle command ProvideAnswer;
+    handle command ProvideICECandidates;
+    handle command EndSession;
+  }
+}
 
 
