@@ -33,7 +33,7 @@
 namespace MatterBridge {
 
 constexpr chip::EndpointId kFirstCameraSlotEndpoint = 3;
-constexpr size_t           kCameraSlotCount         = 8;
+constexpr size_t           kCameraSlotCount         = 12;
 
 struct CameraSlot
 {
