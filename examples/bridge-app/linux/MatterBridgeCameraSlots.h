@@ -13,11 +13,13 @@
  */
 #pragma once
 
-#include <app/clusters/camera-av-settings-user-level-management-server/camera-av-settings-user-level-management-server.h>
-#include <app/clusters/camera-av-stream-management-server/camera-av-stream-management-server.h>
-#include <app/clusters/webrtc-transport-provider-server/webrtc-transport-provider-server.h>
+#include <app/clusters/camera-av-settings-user-level-management-server/CameraAvSettingsUserLevelManagementCluster.h>
+#include <app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.h>
+#include <app/clusters/webrtc-transport-provider-server/WebRTCTransportProviderCluster.h>
 #include <app/clusters/zone-management-server/zone-management-server.h>
+#include <app/server-cluster/ServerClusterInterfaceRegistry.h>
 #include <app/util/attribute-storage.h>
+#include <optional>
 
 #include "MatterBridgeAVStreamDelegate.h"
 #include "MatterBridgeUserLevelMgmtDelegate.h"
@@ -42,16 +44,19 @@ struct CameraSlot
     bool             motionActive = false;
 
     std::unique_ptr<AVStreamDelegate>          avDelegate;
-    std::unique_ptr<chip::app::Clusters::CameraAvStreamManagement::CameraAVStreamMgmtServer> avServer;
+    std::unique_ptr<chip::app::Clusters::CameraAvStreamManagement::CameraAVStreamManagementCluster> avServer;
+    std::optional<chip::app::ServerClusterRegistration> avRegistration;
 
     std::unique_ptr<ZoneMgmtDelegate>          zoneDelegate;
     std::unique_ptr<chip::app::Clusters::ZoneManagement::ZoneMgmtServer> zoneServer;
 
     std::unique_ptr<UserLevelMgmtDelegate>     userDelegate;
-    std::unique_ptr<chip::app::Clusters::CameraAvSettingsUserLevelManagement::CameraAvSettingsUserLevelMgmtServer> userServer;
+    std::unique_ptr<chip::app::Clusters::CameraAvSettingsUserLevelManagementCluster> userServer;
+    std::optional<chip::app::ServerClusterRegistration> userRegistration;
 
     std::unique_ptr<WebRTCProviderDelegate>    webrtcDelegate;
-    std::unique_ptr<chip::app::Clusters::WebRTCTransportProvider::WebRTCTransportProviderServer> webrtcServer;
+    std::unique_ptr<chip::app::Clusters::WebRTCTransportProvider::WebRTCTransportProviderCluster> webrtcServer;
+    std::optional<chip::app::ServerClusterRegistration> webrtcRegistration;
 };
 
 /// Construct cluster server + delegate per slot, register them with the

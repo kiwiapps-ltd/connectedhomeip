@@ -72,10 +72,10 @@ CHIP_ERROR WebRTCProviderDelegate::HandleSolicitOffer(const OfferRequestArgs & a
         auto extId = FindExtIdByEndpoint(mEndpointId);
         if (!extId.empty()) req["CameraId"] = extId;
     }
-    if (args.videoStreamId.HasValue() && !args.videoStreamId.Value().IsNull())
-        req["VideoStreamId"] = args.videoStreamId.Value().Value();
-    if (args.audioStreamId.HasValue() && !args.audioStreamId.Value().IsNull())
-        req["AudioStreamId"] = args.audioStreamId.Value().Value();
+    if (args.videoStreams.HasValue() && !args.videoStreams.Value().empty())
+        req["VideoStreamId"] = args.videoStreams.Value().front();
+    if (args.audioStreams.HasValue() && !args.audioStreams.Value().empty())
+        req["AudioStreamId"] = args.audioStreams.Value().front();
     EncodeICEServers(args.iceServers, req["IceServers"]);
     if (args.iceTransportPolicy.HasValue()) req["IceTransportPolicy"] = args.iceTransportPolicy.Value();
 
@@ -135,10 +135,10 @@ CHIP_ERROR WebRTCProviderDelegate::HandleProvideOffer(const ProvideOfferRequestA
         auto extId = FindExtIdByEndpoint(mEndpointId);
         if (!extId.empty()) req["CameraId"] = extId;
     }
-    if (args.videoStreamId.HasValue() && !args.videoStreamId.Value().IsNull())
-        req["VideoStreamId"] = args.videoStreamId.Value().Value();
-    if (args.audioStreamId.HasValue() && !args.audioStreamId.Value().IsNull())
-        req["AudioStreamId"] = args.audioStreamId.Value().Value();
+    if (args.videoStreams.HasValue() && !args.videoStreams.Value().empty())
+        req["VideoStreamId"] = args.videoStreams.Value().front();
+    if (args.audioStreams.HasValue() && !args.audioStreams.Value().empty())
+        req["AudioStreamId"] = args.audioStreams.Value().front();
     req["SDP"] = args.sdp;
     EncodeICEServers(args.iceServers, req["IceServers"]);
     if (args.iceTransportPolicy.HasValue()) req["IceTransportPolicy"] = args.iceTransportPolicy.Value();
@@ -228,9 +228,7 @@ CHIP_ERROR WebRTCProviderDelegate::HandleProvideICECandidates(uint16_t sessionId
     return resp.get("Status", "error").asString() == "ok" ? CHIP_NO_ERROR : CHIP_ERROR_INTERNAL;
 }
 
-CHIP_ERROR WebRTCProviderDelegate::HandleEndSession(uint16_t sessionId, WebRTCEndReasonEnum reasonCode,
-                                                    chip::app::DataModel::Nullable<uint16_t>,
-                                                    chip::app::DataModel::Nullable<uint16_t>)
+CHIP_ERROR WebRTCProviderDelegate::HandleEndSession(uint16_t sessionId, WebRTCEndReasonEnum reasonCode)
 {
     Json::Value req(Json::objectValue);
     req["Name"]      = "WebRTC.EndSession";
@@ -244,19 +242,19 @@ CHIP_ERROR WebRTCProviderDelegate::HandleEndSession(uint16_t sessionId, WebRTCEn
 
 CHIP_ERROR WebRTCProviderDelegate::ValidateStreamUsage(
     StreamUsageEnum streamUsage,
-    chip::Optional<chip::app::DataModel::Nullable<uint16_t>> & videoStreamId,
-    chip::Optional<chip::app::DataModel::Nullable<uint16_t>> & audioStreamId)
+    chip::Optional<std::vector<uint16_t>> & videoStreams,
+    chip::Optional<std::vector<uint16_t>> & audioStreams)
 {
     if (streamUsage != Globals::StreamUsageEnum::kLiveView && streamUsage != Globals::StreamUsageEnum::kRecording)
         return CHIP_ERROR_NOT_FOUND;
     if (mAvStream == nullptr || !mAvStream->HasAnyVideoStream()) return CHIP_ERROR_NOT_FOUND;
 
     // Auto-pick the first allocated video stream when caller didn't specify.
-    if (videoStreamId.HasValue() && videoStreamId.Value().IsNull())
+    if (!videoStreams.HasValue() || videoStreams.Value().empty())
     {
-        videoStreamId.Value().SetNonNull(mAvStream->GetAllocatedVideoStreams().front().videoStreamID);
+        videoStreams.SetValue(std::vector<uint16_t>{ mAvStream->GetAllocatedVideoStreams().front().videoStreamID });
     }
-    audioStreamId.ClearValue();
+    audioStreams.ClearValue();
     return CHIP_NO_ERROR;
 }
 
@@ -264,6 +262,16 @@ CHIP_ERROR WebRTCProviderDelegate::ValidateVideoStreamID(uint16_t videoStreamId)
 {
     if (mAvStream && mAvStream->HasVideoStream(videoStreamId)) return CHIP_NO_ERROR;
     return CHIP_ERROR_NOT_FOUND;
+}
+
+CHIP_ERROR WebRTCProviderDelegate::ValidateVideoStreams(const std::vector<uint16_t> & videoStreams)
+{
+    if (mAvStream == nullptr) return CHIP_ERROR_NOT_FOUND;
+    for (uint16_t id : videoStreams)
+    {
+        if (!mAvStream->HasVideoStream(id)) return CHIP_ERROR_NOT_FOUND;
+    }
+    return CHIP_NO_ERROR;
 }
 
 CHIP_ERROR WebRTCProviderDelegate::IsStreamUsageSupported(StreamUsageEnum streamUsage)

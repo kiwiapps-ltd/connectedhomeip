@@ -10,6 +10,8 @@
 #include <app/util/endpoint-config-api.h>
 #include <clusters/BridgedDeviceBasicInformation/Attributes.h>
 #include <clusters/OccupancySensing/Attributes.h>
+#include <data-model-providers/codegen/CodegenDataModelProvider.h>
+#include <data-model-providers/codegen/Instance.h>
 #include <lib/support/CodeUtils.h>
 #include <lib/support/logging/CHIPLogging.h>
 
@@ -22,6 +24,18 @@ using namespace chip;
 using namespace chip::app;
 using namespace chip::app::Clusters;
 using Status = Protocols::InteractionModel::Status;
+
+} // namespace MatterBridge
+
+// AVStream cluster has no upstream CodegenIntegration.cpp in 1.5.1.0; ZAP-emitted
+// init/shutdown plumbing still references these symbols. Bridge-app constructs
+// AVStream cluster instances per slot (see MatterBridgeCameraSlots.cpp), so the
+// codegen-path callbacks are no-ops for us.
+void MatterCameraAvStreamManagementClusterInitCallback(chip::EndpointId) {}
+void MatterCameraAvStreamManagementClusterShutdownCallback(chip::EndpointId) {}
+void MatterCameraAvStreamManagementPluginServerInitCallback() {}
+
+namespace MatterBridge {
 
 namespace {
 std::array<CameraSlot, kCameraSlotCount> gSlots;
@@ -95,42 +109,30 @@ void PopulateOccupancyDefaults(EndpointId ep)
     // writes. Don't try to seed it; the cluster reports 0 by default.
 }
 
-// emberAfEndpointEnableDisable(false) calls shutdownEndpoint() which calls
-// AttributeAccessInterfaceRegistry::UnregisterAllForEndpoint() AND
-// CommandHandlerInterfaceRegistry::UnregisterAllCommandHandlersForEndpoint()
-// — both registrations made by the cluster server's Init() get stripped.
-// Re-enabling the endpoint runs cluster init *callbacks* (codegen plugin
-// init), but does NOT call our C++ cluster server's Init() again, so AAI
-// stays missing and every camera-cluster attribute read returns FAILURE
-// (CodegenDataModelProvider_Read.cpp:137 falls through to ember's RAM
-// storage, which has nothing because all camera attributes are External).
-//
-// This helper re-registers what shutdownEndpoint stripped. Call after each
-// emberAfEndpointEnableDisable(slot, true).
+// emberAfEndpointEnableDisable(false) calls shutdownEndpoint() which strips
+// AAI/CHI registrations. The 1.5.1.0 ServerClusterInterfaceRegistry (used by
+// AVStream/UserLevel/WebRTCProvider after their Code-Driven migration) is NOT
+// touched by shutdownEndpoint, so those clusters only need to be registered
+// once at construction. Zone is the lone holdout still on AAI/CHI; this
+// helper re-registers it after each enable cycle.
 void ReregisterSlotClusterServers(CameraSlot & slot)
 {
     auto & aai = chip::app::AttributeAccessInterfaceRegistry::Instance();
     auto & chr = chip::app::CommandHandlerInterfaceRegistry::Instance();
 
-    auto reg = [&](chip::app::AttributeAccessInterface * a, chip::app::CommandHandlerInterface * h, const char * name) {
-        if (a && !aai.Register(a))
+    if (slot.zoneServer)
+    {
+        if (!aai.Register(slot.zoneServer.get()))
         {
-            ChipLogError(NotSpecified, "Re-register AAI failed for %s ep=%u", name, slot.endpointId);
+            ChipLogError(NotSpecified, "Re-register AAI failed for ZoneMgmt ep=%u", slot.endpointId);
         }
-        if (h)
+        CHIP_ERROR err = chr.RegisterCommandHandler(slot.zoneServer.get());
+        if (err != CHIP_NO_ERROR)
         {
-            CHIP_ERROR err = chr.RegisterCommandHandler(h);
-            if (err != CHIP_NO_ERROR)
-            {
-                ChipLogError(NotSpecified, "Re-register CommandHandler failed for %s ep=%u: %" CHIP_ERROR_FORMAT,
-                             name, slot.endpointId, err.Format());
-            }
+            ChipLogError(NotSpecified, "Re-register CommandHandler failed for ZoneMgmt ep=%u: %" CHIP_ERROR_FORMAT,
+                         slot.endpointId, err.Format());
         }
-    };
-    reg(slot.avServer.get(),     slot.avServer.get(),     "AVStreamMgmt");
-    reg(slot.zoneServer.get(),   slot.zoneServer.get(),   "ZoneMgmt");
-    reg(slot.userServer.get(),   slot.userServer.get(),   "UserLevelMgmt");
-    reg(slot.webrtcServer.get(), slot.webrtcServer.get(), "WebRTCProvider");
+    }
 }
 
 void ConstructSlot(CameraSlot & slot, EndpointId ep)
@@ -197,7 +199,7 @@ void ConstructSlot(CameraSlot & slot, EndpointId ep)
     priorities.push_back(Globals::StreamUsageEnum::kLiveView);
     priorities.push_back(Globals::StreamUsageEnum::kRecording);
 
-    slot.avServer = std::make_unique<CameraAvStreamManagement::CameraAVStreamMgmtServer>(
+    slot.avServer = std::make_unique<CameraAvStreamManagement::CameraAVStreamManagementCluster>(
         *slot.avDelegate, ep, avFeatures, avOptional,
         /*maxConcurrentEncoders=*/1, /*maxEncodedPixelRate=*/0, sensor, /*nightVisionUsesInfrared=*/false,
         minViewport, rdPoints, /*maxContentBufferSize=*/0, micCaps, spkrCaps,
@@ -208,6 +210,12 @@ void ConstructSlot(CameraSlot & slot, EndpointId ep)
         if (err != CHIP_NO_ERROR)
         {
             ChipLogError(NotSpecified, "AVStream Init failed for slot ep=%u: %" CHIP_ERROR_FORMAT, ep, err.Format());
+        }
+        slot.avRegistration.emplace(*slot.avServer);
+        CHIP_ERROR regErr = chip::app::CodegenDataModelProvider::Instance().Registry().Register(*slot.avRegistration);
+        if (regErr != CHIP_NO_ERROR)
+        {
+            ChipLogError(NotSpecified, "AVStream Registry::Register failed ep=%u: %" CHIP_ERROR_FORMAT, ep, regErr.Format());
         }
     }
 
@@ -233,27 +241,32 @@ void ConstructSlot(CameraSlot & slot, EndpointId ep)
     // movements with UnsupportedAccess until the back-channel is wired.
     BitFlags<CameraAvSettingsUserLevelManagement::Feature> userFeatures;
     userFeatures.Set(CameraAvSettingsUserLevelManagement::Feature::kDigitalPTZ);
-    BitFlags<CameraAvSettingsUserLevelManagement::OptionalAttributes> userOptional;
-    // Init() pairs DPTZStreams optional attribute with DigitalPTZ feature; either both
-    // present or neither.
-    userOptional.Set(CameraAvSettingsUserLevelManagement::OptionalAttributes::kDptzStreams);
-    slot.userServer = std::make_unique<CameraAvSettingsUserLevelManagement::CameraAvSettingsUserLevelMgmtServer>(
-        ep, *slot.userDelegate, userFeatures, userOptional, /*maxPresets=*/0);
+    slot.userServer = std::make_unique<chip::app::Clusters::CameraAvSettingsUserLevelManagementCluster>(
+        ep, userFeatures, /*maxPresets=*/0);
+    slot.userServer->SetDelegate(slot.userDelegate.get());
     {
         CHIP_ERROR err = slot.userServer->Init();
         if (err != CHIP_NO_ERROR)
         {
             ChipLogError(NotSpecified, "UserLevelMgmt Init failed for slot ep=%u: %" CHIP_ERROR_FORMAT, ep, err.Format());
         }
+        slot.userRegistration.emplace(*slot.userServer);
+        CHIP_ERROR regErr = chip::app::CodegenDataModelProvider::Instance().Registry().Register(*slot.userRegistration);
+        if (regErr != CHIP_NO_ERROR)
+        {
+            ChipLogError(NotSpecified, "UserLevelMgmt Registry::Register failed ep=%u: %" CHIP_ERROR_FORMAT, ep, regErr.Format());
+        }
     }
 
-    // WebRTCTransportProvider — no allocated streams, all sessions rejected.
-    slot.webrtcServer = std::make_unique<WebRTCTransportProvider::WebRTCTransportProviderServer>(*slot.webrtcDelegate, ep);
+    // WebRTCTransportProvider — DefaultServerCluster pattern: no Init(), wired
+    // straight into the data model provider's registry.
+    slot.webrtcServer = std::make_unique<WebRTCTransportProvider::WebRTCTransportProviderCluster>(ep, *slot.webrtcDelegate);
     {
-        CHIP_ERROR err = slot.webrtcServer->Init();
-        if (err != CHIP_NO_ERROR)
+        slot.webrtcRegistration.emplace(*slot.webrtcServer);
+        CHIP_ERROR regErr = chip::app::CodegenDataModelProvider::Instance().Registry().Register(*slot.webrtcRegistration);
+        if (regErr != CHIP_NO_ERROR)
         {
-            ChipLogError(NotSpecified, "WebRTCProvider Init failed for slot ep=%u: %" CHIP_ERROR_FORMAT, ep, err.Format());
+            ChipLogError(NotSpecified, "WebRTCProvider Registry::Register failed ep=%u: %" CHIP_ERROR_FORMAT, ep, regErr.Format());
         }
     }
 }

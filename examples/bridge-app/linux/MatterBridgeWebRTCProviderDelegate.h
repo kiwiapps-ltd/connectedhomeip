@@ -10,7 +10,7 @@
  */
 #pragma once
 
-#include <app/clusters/webrtc-transport-provider-server/webrtc-transport-provider-server.h>
+#include <app/clusters/webrtc-transport-provider-server/WebRTCTransportProviderCluster.h>
 #include <app/CASESessionManager.h>
 #include <lib/core/CHIPCallback.h>
 #include <lib/core/ScopedNodeId.h>
@@ -40,15 +40,15 @@ public:
     CHIP_ERROR HandleProvideOffer(const ProvideOfferRequestArgs & args, WebRTCSessionStruct & outSession) override;
     CHIP_ERROR HandleProvideAnswer(uint16_t sessionId, const std::string & sdpAnswer) override;
     CHIP_ERROR HandleProvideICECandidates(uint16_t sessionId, const std::vector<ICECandidateStruct> & candidates) override;
-    CHIP_ERROR HandleEndSession(uint16_t sessionId, WebRTCEndReasonEnum reasonCode,
-                                chip::app::DataModel::Nullable<uint16_t> videoStreamID,
-                                chip::app::DataModel::Nullable<uint16_t> audioStreamID) override;
+    CHIP_ERROR HandleEndSession(uint16_t sessionId, WebRTCEndReasonEnum reasonCode) override;
 
     CHIP_ERROR ValidateStreamUsage(StreamUsageEnum streamUsage,
-                                   chip::Optional<chip::app::DataModel::Nullable<uint16_t>> & videoStreamId,
-                                   chip::Optional<chip::app::DataModel::Nullable<uint16_t>> & audioStreamId) override;
+                                   chip::Optional<std::vector<uint16_t>> & videoStreams,
+                                   chip::Optional<std::vector<uint16_t>> & audioStreams) override;
     CHIP_ERROR ValidateVideoStreamID(uint16_t videoStreamId) override;
     CHIP_ERROR ValidateAudioStreamID(uint16_t /*audioStreamId*/) override { return CHIP_ERROR_NOT_FOUND; }
+    CHIP_ERROR ValidateVideoStreams(const std::vector<uint16_t> & videoStreams) override;
+    CHIP_ERROR ValidateAudioStreams(const std::vector<uint16_t> & /*audioStreams*/) override { return CHIP_ERROR_NOT_FOUND; }
     CHIP_ERROR IsStreamUsageSupported(StreamUsageEnum streamUsage) override;
     CHIP_ERROR IsHardPrivacyModeActive(bool & isActive) override
     {

@@ -6,17 +6,16 @@
  */
 #pragma once
 
-#include <app/clusters/camera-av-settings-user-level-management-server/camera-av-settings-user-level-management-server.h>
+#include <app/clusters/camera-av-settings-user-level-management-server/CameraAvSettingsUserLevelManagementCluster.h>
 
 namespace MatterBridge {
 
-class UserLevelMgmtDelegate : public chip::app::Clusters::CameraAvSettingsUserLevelManagement::Delegate
+class UserLevelMgmtDelegate : public chip::app::Clusters::CameraAvSettingsUserLevelManagementDelegate
 {
 public:
     using Status               = chip::Protocols::InteractionModel::Status;
-    using MPTZStructType       = chip::app::Clusters::CameraAvSettingsUserLevelManagement::MPTZStructType;
     using MPTZPresetHelper     = chip::app::Clusters::CameraAvSettingsUserLevelManagement::MPTZPresetHelper;
-    using DPTZStruct           = chip::app::Clusters::CameraAvSettingsUserLevelManagement::DPTZStruct;
+    using DPTZStruct           = chip::app::Clusters::CameraAvSettingsUserLevelManagement::Structs::DPTZStruct::Type;
     using ViewportStructType   = chip::app::Clusters::Globals::Structs::ViewportStruct::Type;
     using PhysicalPTZCallback  = chip::app::Clusters::CameraAvSettingsUserLevelManagement::PhysicalPTZCallback;
 

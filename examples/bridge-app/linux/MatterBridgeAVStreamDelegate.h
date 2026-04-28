@@ -13,11 +13,11 @@
  */
 #pragma once
 
-#include <app/clusters/camera-av-stream-management-server/camera-av-stream-management-server.h>
+#include <app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.h>
 
 namespace MatterBridge {
 
-class AVStreamDelegate : public chip::app::Clusters::CameraAvStreamManagement::CameraAVStreamMgmtDelegate
+class AVStreamDelegate : public chip::app::Clusters::CameraAvStreamManagement::CameraAVStreamManagementDelegate
 {
 public:
     AVStreamDelegate() = default;
@@ -57,8 +57,6 @@ public:
                            ImageSnapshot & outImageSnapshot) override;
 
     CHIP_ERROR PersistentAttributesLoadedCallback() override { return CHIP_NO_ERROR; }
-    CHIP_ERROR OnTransportAcquireAudioVideoStreams(uint16_t, uint16_t) override { return CHIP_NO_ERROR; }
-    CHIP_ERROR OnTransportReleaseAudioVideoStreams(uint16_t, uint16_t) override { return CHIP_NO_ERROR; }
     const std::vector<VideoStreamStruct> & GetAllocatedVideoStreams() const override { return mAllocatedVideoStreams; }
     const std::vector<AudioStreamStruct> & GetAllocatedAudioStreams() const override { return mEmptyAudioStreams; }
 
