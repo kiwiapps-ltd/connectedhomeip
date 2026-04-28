@@ -15,6 +15,7 @@
 #include <lib/support/CodeUtils.h>
 #include <lib/support/logging/CHIPLogging.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -77,7 +78,7 @@ void WriteScalarAttribute(EndpointId ep, ClusterId cluster, AttributeId attr, T 
     }
 }
 
-void PopulateBdbiDefaults(EndpointId ep, const std::string & nodeLabel, bool reachable)
+void PopulateBdbiDefaults(EndpointId ep, const std::string & nodeLabel, bool reachable, const std::string & extId)
 {
     using namespace BridgedDeviceBasicInformation::Attributes;
     WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, NodeLabel::Id,         nodeLabel);
@@ -85,6 +86,21 @@ void PopulateBdbiDefaults(EndpointId ep, const std::string & nodeLabel, bool rea
     WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, ProductName::Id,       "Bridged Camera");
     WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, HardwareVersionString::Id, "1.0");
     WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, SoftwareVersionString::Id, "0.1.0");
+
+    // UniqueID is the spec-mandated stable identifier ecosystems use to
+    // de-duplicate bridged children across reboots. SmartThings (and
+    // Apple Home, Google) collapse all endpoints with the same empty
+    // UniqueID into a single device — which is why all but one of our
+    // cameras vanished from SmartThings, and why every helper restart
+    // looked like brand-new devices and lost history. Use the camera
+    // UUID without dashes (32 chars) so it fits the spec's 32-byte cap.
+    // SerialNumber gets the dashed form for ecosystems (e.g. Apple) that
+    // surface it as a "stable identifier" in their UI.
+    std::string canonicalUniqueId = extId;
+    canonicalUniqueId.erase(std::remove(canonicalUniqueId.begin(), canonicalUniqueId.end(), '-'),
+                            canonicalUniqueId.end());
+    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, UniqueID::Id,    canonicalUniqueId);
+    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, SerialNumber::Id, extId);
 
     uint16_t vendorId       = 0xFFF1;
     uint16_t hardwareVer    = 1;
@@ -219,9 +235,15 @@ void ConstructSlot(CameraSlot & slot, EndpointId ep)
         }
     }
 
-    // ZoneMgmt — no features, but Init() requires MaxZones >= 1 when UserDefined
-    // is off, and SensitivityMax must be in [2, 10].
+    // ZoneMgmt — declare kTwoDimensionalCartesianZone feature so the
+    // Zones / TwoDCartesianMax / featureMap attributes return real
+    // values (with no features the spec gates them as
+    // UNSUPPORTED_ATTRIBUTE and SmartThings's matter-camera Edge driver
+    // refuses to subscribe to ZoneTriggered/ZoneStopped events — i.e.
+    // the SmartThings history view stays empty).
+    // SensitivityMax must be in [2, 10].
     BitFlags<ZoneManagement::Feature> zoneFeatures;
+    zoneFeatures.Set(ZoneManagement::Feature::kTwoDimensionalCartesianZone);
     ZoneManagement::TwoDCartesianVertexStruct twoDMax;
     twoDMax.x = 1919;
     twoDMax.y = 1079;
@@ -390,7 +412,7 @@ void HandleAddCamera(const Json::Value & cmd)
     // call our C++ Init() again, so the AAI is still missing — every read on
     // this endpoint's camera clusters would return FAILURE. Re-attach.
     ReregisterSlotClusterServers(*slot);
-    PopulateBdbiDefaults(slot->endpointId, name, /*reachable=*/true);
+    PopulateBdbiDefaults(slot->endpointId, name, /*reachable=*/true, slot->extId);
     PopulateOccupancyDefaults(slot->endpointId);
     // Tell subscribed controllers (SmartThings, Apple Home, …) the
     // aggregator's child set just changed. Without this, controllers
