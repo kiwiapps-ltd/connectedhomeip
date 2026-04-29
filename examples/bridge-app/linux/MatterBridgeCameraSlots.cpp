@@ -15,8 +15,11 @@
 #include <lib/support/CodeUtils.h>
 #include <lib/support/logging/CHIPLogging.h>
 
+#include <crypto/CHIPCryptoPAL.h>
+
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstring>
 
 namespace MatterBridge {
@@ -88,19 +91,46 @@ void PopulateBdbiDefaults(EndpointId ep, const std::string & nodeLabel, bool rea
     WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, SoftwareVersionString::Id, "0.1.0");
 
     // UniqueID is the spec-mandated stable identifier ecosystems use to
-    // de-duplicate bridged children across reboots. SmartThings (and
-    // Apple Home, Google) collapse all endpoints with the same empty
-    // UniqueID into a single device — which is why all but one of our
-    // cameras vanished from SmartThings, and why every helper restart
-    // looked like brand-new devices and lost history. Use the camera
-    // UUID without dashes (32 chars) so it fits the spec's 32-byte cap.
-    // SerialNumber gets the dashed form for ecosystems (e.g. Apple) that
-    // surface it as a "stable identifier" in their UI.
-    std::string canonicalUniqueId = extId;
-    canonicalUniqueId.erase(std::remove(canonicalUniqueId.begin(), canonicalUniqueId.end(), '-'),
-                            canonicalUniqueId.end());
-    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, UniqueID::Id,    canonicalUniqueId);
-    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, SerialNumber::Id, extId);
+    // de-duplicate bridged children across reboots. Derive it from the
+    // camera's display name (lowercased + trimmed) via SHA-256 so:
+    //   1. The same camera name always produces the same UniqueID
+    //      across helper restarts AND across SwiftData store resets
+    //      (the prior derivation used the SwiftData UUID `extId` which
+    //      changes if the user reimports cameras → SmartThings sees
+    //      brand-new devices and loses history).
+    //   2. Two distinct cameras with different names get distinct
+    //      UniqueIDs (no collisions short of a SHA-256 collision).
+    //   3. SmartThings's UniqueID-based dedup permanently anchors each
+    //      camera regardless of which Matter endpoint slot it lands on
+    //      after a reshuffled push order.
+    std::string nameKey = nodeLabel;
+    std::transform(nameKey.begin(), nameKey.end(), nameKey.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    chip::Crypto::Hash_SHA256_stream hash;
+    hash.Begin();
+    hash.AddData(chip::ByteSpan(reinterpret_cast<const uint8_t *>(nameKey.data()), nameKey.size()));
+    uint8_t digest[chip::Crypto::kSHA256_Hash_Length];
+    chip::MutableByteSpan digestSpan(digest);
+    hash.Finish(digestSpan);
+    static const char hexChars[] = "0123456789abcdef";
+    std::string uniqueId; uniqueId.reserve(32);
+    for (size_t i = 0; i < 16; ++i) {  // 16 bytes → 32 hex chars (BDBI cap)
+        uniqueId.push_back(hexChars[(digest[i] >> 4) & 0xF]);
+        uniqueId.push_back(hexChars[digest[i] & 0xF]);
+    }
+    // SerialNumber gets a UUID-shaped formatting of the same hash so
+    // it's still recognizable as "stable per camera name" but visually
+    // distinct from the UniqueID hex blob.
+    std::string serial;
+    serial.reserve(36);
+    for (size_t i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) serial.push_back('-');
+        serial.push_back(hexChars[(digest[i] >> 4) & 0xF]);
+        serial.push_back(hexChars[digest[i] & 0xF]);
+    }
+    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, UniqueID::Id,    uniqueId);
+    WriteCharStringAttribute(ep, BridgedDeviceBasicInformation::Id, SerialNumber::Id, serial);
+    ChipLogProgress(NotSpecified, "BDBI ep=%u name='%s' UniqueID=%s", ep, nodeLabel.c_str(), uniqueId.c_str());
 
     uint16_t vendorId       = 0xFFF1;
     uint16_t hardwareVer    = 1;
