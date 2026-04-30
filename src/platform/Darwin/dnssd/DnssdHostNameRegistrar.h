@@ -65,6 +65,15 @@ namespace Dnssd {
 
         DNSServiceRef mServiceRef = nullptr;
         std::string mHostname;
+        // MatterBridge patch: cache the canonical signature of the last
+        // interface/address set we registered so a no-op `nw_path_monitor`
+        // update doesn't tear down + re-register the same records. macOS
+        // 26.3's `mDNSResponder` doesn't fully release prior `DNSRecordRef`s
+        // on rapid `DNSServiceRefDeallocate` cycles, accumulating per-record
+        // state forever — verified via heap: 23 GB system OOM after ~7 h
+        // idle uptime with 57 k OnRegisterRecord events for the same
+        // address set.
+        std::string mLastInterfacesSignature;
 
         static void OnRegisterRecord(DNSServiceRef sdRef, DNSRecordRef recordRef, DNSServiceFlags flags, DNSServiceErrorType err, void * context);
         static void OnRegisterRecordTimeout(System::Layer * layer, void * appState);

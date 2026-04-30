@@ -23,11 +23,13 @@
 #include "DnssdError.h"
 #include "DnssdImpl.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/ethernet.h>
 #include <net/if_dl.h>
 #include <netdb.h>
+#include <stdio.h>
 
 #include <set>
 
@@ -38,6 +40,49 @@ constexpr uint16_t kRegisterRecordTimeoutInSeconds = 30;
 
 namespace chip {
 namespace Dnssd {
+
+    namespace {
+        // MatterBridge patch — see DnssdHostNameRegistrar.h for the full
+        // rationale. Builds a deterministic byte-level signature of the
+        // resolved interface+address set so we can detect no-op
+        // nw_path_monitor updates (which fire many times per minute on a
+        // stable LAN due to BSSID transitions / IPv6 SLAAC refreshes) and
+        // skip the DNSServiceRefDeallocate + DNSServiceRegisterRecord
+        // cycle. Without this, mDNSResponder accumulates per-record state
+        // until the system OOMs.
+        std::string SignatureForInterfaces(Inet::Darwin::InetInterfacesVector const & v4,
+                                           Inet::Darwin::Inet6InterfacesVector const & v6)
+        {
+            std::vector<std::string> entries;
+            entries.reserve(v4.size() + v6.size());
+            char buf[80];
+            for (auto const & p : v4) {
+                snprintf(buf, sizeof(buf), "%u:4:%08x",
+                    nw_interface_get_index(p.first),
+                    static_cast<unsigned>(p.second.s_addr));
+                entries.emplace_back(buf);
+            }
+            for (auto const & p : v6) {
+                auto const & a = p.second;
+                snprintf(buf, sizeof(buf),
+                    "%u:6:%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                    nw_interface_get_index(p.first),
+                    a.s6_addr[0], a.s6_addr[1], a.s6_addr[2], a.s6_addr[3],
+                    a.s6_addr[4], a.s6_addr[5], a.s6_addr[6], a.s6_addr[7],
+                    a.s6_addr[8], a.s6_addr[9], a.s6_addr[10], a.s6_addr[11],
+                    a.s6_addr[12], a.s6_addr[13], a.s6_addr[14], a.s6_addr[15]);
+                entries.emplace_back(buf);
+            }
+            std::sort(entries.begin(), entries.end());
+            std::string sig;
+            sig.reserve(entries.size() * 32);
+            for (auto const & e : entries) {
+                sig.append(e);
+                sig.push_back(';');
+            }
+            return sig;
+        }
+    } // namespace
 
     HostNameRegistrar::~HostNameRegistrar()
     {
@@ -77,6 +122,18 @@ namespace Dnssd {
         } else {
             error = StartMonitorInterfaces(
                 ^(Inet::Darwin::InetInterfacesVector inetInterfaces, Inet::Darwin::Inet6InterfacesVector inet6Interfaces) {
+                    // MatterBridge patch: skip re-register when the resolved
+                    // interface+address set is unchanged. nw_path_monitor on
+                    // macOS 26.3 fires every 1-2 s on a stable LAN (BSSID
+                    // transitions, IPv6 SLAAC refreshes) and re-registering
+                    // identical records leaks per-record state in the system
+                    // mDNSResponder daemon (verified: 23 GB system OOM after
+                    // 7 h with 57 k OnRegisterRecord events).
+                    auto signature = SignatureForInterfaces(inetInterfaces, inet6Interfaces);
+                    if (signature == mLastInterfacesSignature) {
+                        return;
+                    }
+                    mLastInterfacesSignature = signature;
                     ReturnOnFailure(ResetSharedConnection());
                     RegisterInterfaces(inetInterfaces, kDNSServiceType_A);
                     RegisterInterfaces(inet6Interfaces, kDNSServiceType_AAAA);
@@ -103,6 +160,8 @@ namespace Dnssd {
             NetworkMonitor::Stop();
         }
         StopSharedConnection();
+        // Clear the dedup cache so a future Register() always re-publishes.
+        mLastInterfacesSignature.clear();
 
         mOnRegisterRecordCallback = nullptr;
 
